@@ -1,0 +1,30 @@
+services:
+  informes-api:
+    build: .
+    container_name: informes-financieros-api
+    restart: unless-stopped
+    ports:
+      # Host 8011 -> Contenedor 8000 (acceso desde fuera de Docker)
+      - "8011:8000"
+    environment:
+      OAUTH_CLIENT_FILE: credentials/oauth_client.json
+      OAUTH_TOKEN_FILE: credentials/token.json
+      SLIDES_TEMPLATE_ID: ${SLIDES_TEMPLATE_ID}
+      DRIVE_FOLDER_ID: ${DRIVE_FOLDER_ID:-}
+    volumes:
+      # Credenciales: read-write porque el token se refresca solo
+      - ./credentials:/service/credentials
+    networks:
+      # Misma red que n8n: permite que n8n llame a este servicio por nombre.
+      - n8n_net
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  n8n_net:
+    name: sesion-idealista_default
+    external: true

@@ -1,0 +1,180 @@
+{
+  "sede": "Valencia",
+  "sede_upper": "VALENCIA",
+  "mes_año": "Abril 2026",
+  "mes_año_upper": "ABRIL 2026",
+  "mes_anterior_short": "Mar '26",
+  "mes_año_anterior_short": "Abr '25",
+  "mes_anterior_upper": "MAR 2026",
+  "mes_año_upper_short": "ABR 2026",
+  "mes_año_anterior_upper": "ABRIL 2025",
+  "mes_año_anterior_short_upper": "ABR'25",
+  "mes_siguiente_upper": "MAYO 2026",
+  "mes_siguiente_upper_solo": "MAYO",
+
+  "reservas_totales": "547.139 €",
+  "contratos_firmados": "510.842 €",
+  "ingresos_totales": "423.400 €",
+  "tramo_comision": "3 %",
+
+  "var_reservas_mom": "-6,6 %",
+  "n_ops_reservas": "42",
+  "delta_ops_reservas": "-18 ops",
+  "reservas_mes_anterior": "585.720 €",
+  "reservas_año_anterior": "359.135 €",
+
+  "var_contratos_mom": "+33,70 %",
+  "n_ops_contratos": "41",
+  "delta_ops_contratos": "+3 ops",
+  "contratos_mes_anterior": "382.142 €",
+  "contratos_año_anterior": "388.808 €",
+
+  "var_ingresos_mom": "+6,70 %",
+  "ingresos_ventas": "397.283 €",
+  "ingresos_alquiler": "26.116 €",
+  "ingresos_mes_anterior": "396.823 €",
+  "margen_bruto": "60 %",
+
+  "rentabilidad_op": "29,16 %",
+  "var_rentab_mom": "-1,82 %",
+  "resultado_op": "123.478 €",
+  "objetivo_rentabilidad": "20 %",
+
+  "ticket_medio": "12.460 €",
+  "var_ticket_medio_mom": "+23,9 %",
+  "rentabilidad_op_signed": "+29,16 %",
+  "volumen_riesgo_short": "135,8 k €",
+  "n_ops_condicionadas": "9",
+
+  "total_pendiente_cobro": "204.392 €",
+  "volumen_riesgo": "135.855 €",
+  "total_pipeline": "749.537 €",
+  "n_ops_pipeline": "34",
+  "inversion_tecnologica": "27k€",
+
+  "reservas_alquiler": "28.065 €",
+  "var_reservas_alquiler_mom": "▲8,87 %",
+  "n_ops_reservas_alquiler": "12",
+  "delta_ops_reservas_alquiler": "- 6 op.",
+  "contratos_alquiler": "22.725 €",
+  "var_contratos_alquiler_mom": "▼17,15 %",
+  "n_ops_contratos_alquiler": "7",
+  "delta_ops_contratos_alquiler": "- 8 ops.",
+  "total_pipeline_alquiler": "10.720 €",
+  "n_ops_pipeline_alquiler": "6",
+  "nota_pipeline_alquiler": "* Las 3 operaciones firmadas entre el 4 y el 5 de mayo.",
+
+  "break_even": "263.292 €",
+  "margen_10_objetivo": "319.311 €",
+  "margen_20_objetivo": "405.612 €",
+  "margen_30_objetivo": "555.838 €",
+  "margen_40_objetivo": "882.802 €",
+  "break_even_estado": "✓ SUPERADO",
+  "margen_10_estado": "✓ SUPERADO",
+  "margen_20_estado": "✓ SUPERADO",
+  "margen_30_estado": "FALTAN: 132.438 €",
+  "margen_40_estado": "FALTAN: 459.402 €",
+  "margen_seguridad": "160.108 €",
+  "narrativa_break_even": "Los ingresos reales del mes (423.400 €) han superado ampliamente el Break Even (263.292 €), consolidando un margen de seguridad en caja espectacular.\n\nTras haber materializado el cobro de gran parte del volumen total de arras firmadas (510.842 €), contamos aún con un remanente que garantiza la continuidad de ingresos para mayo.",
+
+  "facturacion_objetivo_proy": "450.000 €",
+  "break_even_proy": "266.332 €",
+  "margen_10_objetivo_proy": "322.998 €",
+  "margen_20_objetivo_proy": "410.295 €",
+  "margen_30_objetivo_proy": "562.256 €",
+
+  "n_ops_reservas_mes_anterior": "60",
+  "n_ops_contratos_mes_anterior": "38",
+  "var_reservas_mom_arrow": "▼ -6,6 %",
+  "var_contratos_mom_arrow": "▲ +33,7 %",
+  "delta_ops_reservas_full": "-18 ops (-30 %)",
+  "delta_ops_contratos_full": "+3 ops (+8 %)",
+  "var_reservas_yoy": "+ 52 %",
+  "var_contratos_yoy": "+ 31 %",
+  "ticket_medio_mes_anterior": "10.056 €",
+
+  "ventas_cobradas_mes": "370.926,53 €",
+  "comision_ventas_mes": "11.127,80 €",
+  "alquileres_cobrados_mes": "22.075,00 €",
+  "comision_alquileres_mes": "662,25 €",
+  "subtotal_comision_mes": "11.790,05 €",
+  "subtotal_comision_atrasos": "1.021,89 €",
+  "total_comision_repartir": "12.811,94 €",
+  "comision_variable_por_director": "6.405,97 €",
+  "sueldo_fijo_director": "2.666,67 €",
+  "total_por_director": "9.072,64 €",
+
+  "comisiones_atrasos": [
+    {"nombre": "Malvarrosa 19", "mes": "Nov.", "tramo": "(3%)", "importe": "256,49 €"},
+    {"nombre": "Calixto 41", "mes": "Dic.", "tramo": "(2%)", "importe": "108,00 €"},
+    {"nombre": "Doctor Moliner", "mes": "Ene.", "tramo": "(2%)", "importe": "432,00 €"},
+    {"nombre": "Nueva Tabarca", "mes": "Feb.", "tramo": "(2%)", "importe": "107,40 €"},
+    {"nombre": "Santos Justo y Pastor", "mes": "Feb.", "tramo": "(2%)", "importe": "96,00 €"},
+    {"nombre": "Alquiler - Blanes 4", "mes": "Feb.", "tramo": "(2%)", "importe": "22,00 €"}
+  ],
+
+  "impacto_facturacion": "Crítico",
+  "total_pendiente_cobro_sin_euro": "204.392",
+  "nota_cobros": "* Cobrada el 4 de mayo",
+
+  "total_ventas_pipeline": "144.107 €",
+  "total_obra_nueva": "600.090 €",
+
+  "ventas_pendientes": [
+    {"nombre": "C. 550, 45", "importe": "20.000 €"},
+    {"nombre": "C. Obispo Amigo 9", "importe": "40.300 €"},
+    {"nombre": "C. Río Nervión 5", "importe": "10.512 €"},
+    {"nombre": "C. Isaac Albeñiz, D, 13", "importe": "20.450 €"},
+    {"nombre": "Pl núm. 10 60(b)", "importe": "12.397 €"},
+    {"nombre": "C. San Vicente Martir 3", "importe": "16.098 €"},
+    {"nombre": "C. Timoneda 6", "importe": "12.200 €"},
+    {"nombre": "C. Vicente Raga 3", "importe": "12.150 €"}
+  ],
+
+  "obras_nuevas": [
+    {"nombre": "C. VICTORIA KENT", "importe": "94.240 €"},
+    {"nombre": "Urb Altos Sta Barbara", "importe": "505.850 €"}
+  ],
+
+  "cobros_pendientes": [
+    {"nombre": "Marques Zenete 27, 2", "importe": "2.457 €"},
+    {"nombre": "Santa Barbara 138", "importe": "33.000 €"},
+    {"nombre": "General Elio 4", "importe": "12.500 €"},
+    {"nombre": "Altos de Santa Bárbara 25", "importe": "11.250 €"},
+    {"nombre": "Altos de Santa Bárbara 31", "importe": "7.500 €"},
+    {"nombre": "Altos de Santa Bárbara 29", "importe": "15.000 €"},
+    {"nombre": "C. Bombero Ramón Duart 15", "importe": "8.264 €"},
+    {"nombre": "C. Fontanares 11", "importe": "5.241 €"},
+    {"nombre": "Urb. Altos de Santa Bárbara 39", "importe": "7.500 €"},
+    {"nombre": "Urb. Altos de Santa Bárbara 10", "importe": "21.600 €"},
+    {"nombre": "C. San Pancracio 5", "importe": "4.790 €"},
+    {"nombre": "C. Del foc 3", "importe": "7.500 €"},
+    {"nombre": "C. Ravanell 1", "importe": "10.800 €"},
+    {"nombre": "C. Valencians 6", "importe": "9.000 €"},
+    {"nombre": "C. Piñoner 3", "importe": "22.250 €"},
+    {"nombre": "C. Naturalista Rafael Cisternas 2", "importe": "11.800 €"},
+    {"nombre": "C. Jaume Roig 19", "importe": "9.800 €"},
+    {"nombre": "C. Maestro Anastasio Garcia", "importe": "4.140 € *"}
+  ],
+
+  "operaciones_condicionadas": [
+    {"nombre": "C. Mercat 47", "importe": "12.610 €"},
+    {"nombre": "C. Mercat 47", "importe": "12.545 €"},
+    {"nombre": "C. Trinquet 89", "importe": "13.450 €"},
+    {"nombre": "C. Doctor Villena 20", "importe": "13.650 €"},
+    {"nombre": "C. Llentiscle 1", "importe": "20.400 €"},
+    {"nombre": "C. Agulló 26", "importe": "10.600 €"},
+    {"nombre": "C. Mercat 47", "importe": "10.100 €"},
+    {"nombre": "C. Vidal de Canelles 9", "importe": "5.000 €"},
+    {"nombre": "Paseo Alameda 41", "importe": "37.500 €"}
+  ],
+
+  "pipeline_alquiler": [
+    {"nombre": "▌ C. Pintor Domingo 42", "importe": "2.500 €"},
+    {"nombre": "▌ General San Martín 4", "importe": "1.550 €"},
+    {"nombre": "▌ C. San Miguel 20", "importe": "1.290 €"},
+    {"nombre": "▌ Av. del Puerto 88", "importe": "1.850 €"},
+    {"nombre": "▌ C. Sorní 12", "importe": "2.100 €"},
+    {"nombre": "▌ C. Ruzafa 35", "importe": "1.420 €"}
+  ]
+}

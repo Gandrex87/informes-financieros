@@ -1,0 +1,19 @@
+# NO incluir en la imagen:
+credentials/
+output/
+data/
+.env
+.env.local
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.gitignore
+.vscode/
+.idea/
+informes_valencia_alicante/
+*.md
+scripts/
+tests/

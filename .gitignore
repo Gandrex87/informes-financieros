@@ -1,0 +1,36 @@
+# Credenciales — NUNCA subir a git
+credentials/
+
+# Variables de entorno
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+
+# Output
+output/
+
+# PDFs e informes históricos
+informes_valencia_alicante/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
