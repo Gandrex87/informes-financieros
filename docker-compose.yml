@@ -11,6 +11,13 @@ services:
       OAUTH_TOKEN_FILE: credentials/token.json
       SLIDES_TEMPLATE_ID: ${SLIDES_TEMPLATE_ID}
       DRIVE_FOLDER_ID: ${DRIVE_FOLDER_ID:-}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_SCHEMA_VENTAS: ${POSTGRES_SCHEMA_VENTAS:-finanzas_automation}
+      POSTGRES_SCHEMA_INFORMES: ${POSTGRES_SCHEMA_INFORMES:-informes_financieros}
     volumes:
       # Credenciales: read-write porque el token se refresca solo
       - ./credentials:/service/credentials

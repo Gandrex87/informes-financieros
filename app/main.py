@@ -19,8 +19,13 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
 from app.auth import build_clients  # noqa: E402
+from app.calculator import build_payload_slide_2  # noqa: E402
 from app.generator import GenerationError, generate_report  # noqa: E402
-from app.schemas import GenerarInformeRequest, HealthResponse  # noqa: E402
+from app.schemas import (  # noqa: E402
+    GenerarDesdeDBRequest,
+    GenerarInformeRequest,
+    HealthResponse,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -73,7 +78,10 @@ def health():
 
 @app.post("/generar-informe")
 def generar_informe(req: GenerarInformeRequest):
-    """Genera el informe y devuelve el PDF binario."""
+    """Genera el informe y devuelve el PDF binario.
+
+    Recibe el payload completo de tokens (mock / cliente externo lo compone).
+    """
     try:
         pdf_bytes = generate_report(
             data=req.to_data_dict(),
@@ -85,6 +93,46 @@ def generar_informe(req: GenerarInformeRequest):
         raise HTTPException(status_code=502, detail=str(e))
 
     filename = _safe_filename(req.sede, req.mes_año)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/generar-desde-db")
+def generar_desde_db(req: GenerarDesdeDBRequest):
+    """Genera el informe leyendo los datos directamente de Postgres.
+
+    Cobertura actual: slides 1 y 2. Resto de slides quedaran con
+    tokens {{xxx}} sin reemplazar hasta que se amplie el calculator.
+    """
+    try:
+        payload = build_payload_slide_2(
+            sede=req.sede,
+            anyo=req.anyo,
+            mes=req.mes,
+            escenario=req.escenario,
+        )
+    except ValueError as e:
+        # Datos faltantes en Postgres (ej. no hay contabilidad cargada).
+        logger.warning("Datos insuficientes: %s", e)
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Error leyendo datos de Postgres")
+        raise HTTPException(status_code=500, detail=f"Error de DB: {e}")
+
+    try:
+        pdf_bytes = generate_report(
+            data=payload,
+            slides_client=_clients["slides"],
+            drive_client=_clients["drive"],
+        )
+    except GenerationError as e:
+        logger.exception("Error generando informe")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    filename = _safe_filename(req.sede, f"{req.anyo}_{req.mes:02d}")
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

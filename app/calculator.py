@@ -2,11 +2,88 @@
 Calculator: lee Postgres y construye el payload del JSON listo para mandar al
 servicio. Esta version cubre slide 1 + slide 2.
 
-Decisiones:
-- Datos crudos vienen de ventas_comerciales (operaciones individuales).
-- Datos agregados vienen de contabilidad_mensual (snapshot mensual del Sheet).
-- Comparativas YoY: pagas_señales y arras_firmadas de contabilidad_mensual del
-  año anterior. NO usamos ventas_comerciales para YoY porque no hay datos 2025.
+
+# Fuentes de datos
+
+## 1. finanzas_automation.ventas_comerciales (datos crudos)
+Una fila por operacion inmobiliaria. Alimentada desde el Sheet "COMERCIAL LION
+VALENCIA" (pestañas "Ventas VLC 2026" y "Alquiler VLC 2026").
+
+Campos relevantes:
+    - fecha_senal:        fecha de la señalizacion (pagas y señales)
+    - fecha_arras:        fecha de firma de arras
+    - honorarios_totales: importe de honorarios de la operacion
+    - inmueble:           direccion (alquileres llevan prefijo "ALQ.-")
+    - arras_firmadas:     'SI' | 'NO'
+    - condicionadas:      'SI' | 'NO'
+    - tipo:               'compraventa' | (otros para alquiler)
+
+De aqui sacamos: importes y conteos del mes actual y del mes anterior.
+
+## 2. informes_financieros.contabilidad_mensual (snapshot mensual agregado)
+Una fila por (sede, escenario, anyo, mes). Alimentada desde el Sheet contable
+manual de Lion mediante un workflow de n8n (rango B62:V107 del Sheet).
+
+PK: (sede, escenario, anyo, mes). Hoy solo se carga escenario='con_crm'.
+
+De aqui sacamos:
+    - Ingresos (contables, intermediacion, alquileres como "resto_ingresos")
+    - Margenes y rentabilidades (ya calculados en el Sheet)
+    - EBITDA, break even, etc.
+    - YoY de pagas_señales y arras_firmadas (necesario porque ventas_comerciales
+      NO tiene datos de 2025; usamos los agregados manuales que contabilidad cargo).
+
+## 3. Constantes hardcodeadas en codigo
+    - OBJETIVO_RENTABILIDAD: "20 %" — objetivo corporativo fijo.
+    - tramo_comision: "3 %" — pendiente mover a tabla parametros_sede_mes
+      cuando varie por sede o mes.
+
+
+# Mapeo token JSON -> fuente
+
+Token                       | Fuente
+----------------------------+--------------------------------------------
+reservas_totales            | ventas_comerciales: SUM(honorarios) WHERE fecha_senal en mes
+n_ops_reservas              | ventas_comerciales: COUNT(*) WHERE fecha_senal en mes
+contratos_firmados          | ventas_comerciales: SUM(honorarios) WHERE fecha_arras en mes AND arras_firmadas='SI'
+n_ops_contratos             | ventas_comerciales: COUNT(*) idem
+reservas_mes_anterior       | ventas_comerciales: idem reservas pero mes-1
+reservas_año_anterior       | contabilidad_mensual.pagas_señales del año anterior
+contratos_mes_anterior      | ventas_comerciales: idem contratos pero mes-1
+contratos_año_anterior      | contabilidad_mensual.arras_firmadas del año anterior
+ingresos_totales            | contabilidad_mensual.ingresos_contables
+ingresos_ventas             | contabilidad_mensual.honorarios_intermediacion
+ingresos_alquiler           | contabilidad_mensual.resto_ingresos
+ingresos_mes_anterior       | contabilidad_mensual.ingresos_contables (mes-1)
+margen_bruto                | contabilidad_mensual.rentabilidad_bruta_pct (formato porcentaje)
+rentabilidad_op             | contabilidad_mensual.rentabilidad_operativa_pct
+resultado_op                | contabilidad_mensual.ebitda_no_extras
+objetivo_rentabilidad       | constante "20 %"
+tramo_comision              | constante "3 %" (pendiente parametros_sede_mes)
+
+
+# Calculos derivados
+
+Todas las variaciones (var_X_mom) se calculan en Python:
+    (actual - anterior) / anterior
+
+Los deltas de operaciones (delta_ops_*) son restas simples:
+    n_ops_actual - n_ops_anterior
+
+Los colores condicionales (_color_overrides) se decide aqui mismo:
+    "verde" si la variacion >= 0, "rojo" si < 0.
+
+
+# Discrepancias conocidas (P-18 en PENDIENTES.md)
+
+Algunos importes del calculator no cuadran con el PDF de abril 2026:
+    - reservas_totales: -6.100 €
+    - contratos_firmados: -10.576 €
+    - contratos_año_anterior: -58.858 €
+Hipotesis: ventas_comerciales tiene menos operaciones registradas que el
+cuadro manual del Sheet. Pendiente validar con contabilidad. Los numeros
+del calculator vienen directos de la tabla — si la tabla falta operaciones,
+las falta el informe.
 """
 import logging
 import os

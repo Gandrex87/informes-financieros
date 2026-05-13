@@ -42,3 +42,19 @@ class HealthResponse(BaseModel):
     status: str
     template_id: str
     user_email: str | None = None
+
+
+class GenerarDesdeDBRequest(BaseModel):
+    """Payload del endpoint /generar-desde-db.
+
+    Solo recibe identificadores. El servicio se encarga de leer Postgres
+    (via calculator) y componer el payload completo internamente.
+    """
+
+    sede: str = Field(..., description="Nombre de la sede, ej. 'Valencia'.")
+    anyo: int = Field(..., ge=2020, le=2100, description="Año en 4 digitos.")
+    mes: int = Field(..., ge=1, le=12, description="Mes 1-12.")
+    escenario: str = Field(
+        "con_crm",
+        description="Escenario contable: 'solo' | 'con_crm'.",
+    )
