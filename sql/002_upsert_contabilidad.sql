@@ -1,0 +1,82 @@
+-- Query del nodo Postgres en n8n. Una ejecucion por item del Code.
+-- Usa ON CONFLICT para que regenerar el workflow no duplique, sino que actualice.
+--
+-- NULLIF + CAST: si n8n envia el string "null" (cuando el campo es null en JSON),
+-- lo convertimos a NULL real antes de castear a NUMERIC. Si llega un numero, pasa
+-- limpio.
+
+INSERT INTO informes_financieros.contabilidad_mensual (
+    sede, escenario, anyo, mes,
+    "pagas_señales", arras_firmadas, pendientes_firma, ptes_facturar,
+    ingresos_contables, honorarios_intermediacion, resto_ingresos,
+    gastos_directos_asesores, gastos_operativos, gastos_fijos,
+    gastos_variables, gastos_programadores, gastos_extra,
+    gastos_extra_relac_actividad, gastos_extra_fuera_operativa,
+    margen_bruto, rentabilidad_bruta_pct,
+    ebitda_no_extras, rentabilidad_operativa_pct,
+    ebitda_real, rentabilidad_real_pct,
+    pct_comision_asesores,
+    break_even, ingresos_margen_10, ingresos_margen_20,
+    ingresos_margen_30, ingresos_margen_40,
+    break_even_con_extras, ingresos_margen_10_con_extras,
+    ingresos_margen_20_con_extras, ingresos_margen_30_con_extras,
+    ingresos_margen_40_con_extras,
+    actualizado_at
+)
+VALUES (
+    $1, $2, $3::int, $4::int,
+    NULLIF($5, 'null')::numeric,  NULLIF($6, 'null')::numeric,
+    NULLIF($7, 'null')::numeric,  NULLIF($8, 'null')::numeric,
+    NULLIF($9, 'null')::numeric,  NULLIF($10, 'null')::numeric,
+    NULLIF($11, 'null')::numeric,
+    NULLIF($12, 'null')::numeric, NULLIF($13, 'null')::numeric,
+    NULLIF($14, 'null')::numeric, NULLIF($15, 'null')::numeric,
+    NULLIF($16, 'null')::numeric, NULLIF($17, 'null')::numeric,
+    NULLIF($18, 'null')::numeric, NULLIF($19, 'null')::numeric,
+    NULLIF($20, 'null')::numeric, NULLIF($21, 'null')::numeric,
+    NULLIF($22, 'null')::numeric, NULLIF($23, 'null')::numeric,
+    NULLIF($24, 'null')::numeric, NULLIF($25, 'null')::numeric,
+    NULLIF($26, 'null')::numeric,
+    NULLIF($27, 'null')::numeric, NULLIF($28, 'null')::numeric,
+    NULLIF($29, 'null')::numeric, NULLIF($30, 'null')::numeric,
+    NULLIF($31, 'null')::numeric,
+    NULLIF($32, 'null')::numeric, NULLIF($33, 'null')::numeric,
+    NULLIF($34, 'null')::numeric, NULLIF($35, 'null')::numeric,
+    NULLIF($36, 'null')::numeric,
+    NOW()
+)
+ON CONFLICT (sede, escenario, anyo, mes)
+DO UPDATE SET
+    "pagas_señales" = EXCLUDED."pagas_señales",
+    arras_firmadas = EXCLUDED.arras_firmadas,
+    pendientes_firma = EXCLUDED.pendientes_firma,
+    ptes_facturar = EXCLUDED.ptes_facturar,
+    ingresos_contables = EXCLUDED.ingresos_contables,
+    honorarios_intermediacion = EXCLUDED.honorarios_intermediacion,
+    resto_ingresos = EXCLUDED.resto_ingresos,
+    gastos_directos_asesores = EXCLUDED.gastos_directos_asesores,
+    gastos_operativos = EXCLUDED.gastos_operativos,
+    gastos_fijos = EXCLUDED.gastos_fijos,
+    gastos_variables = EXCLUDED.gastos_variables,
+    gastos_programadores = EXCLUDED.gastos_programadores,
+    gastos_extra = EXCLUDED.gastos_extra,
+    gastos_extra_relac_actividad = EXCLUDED.gastos_extra_relac_actividad,
+    gastos_extra_fuera_operativa = EXCLUDED.gastos_extra_fuera_operativa,
+    margen_bruto = EXCLUDED.margen_bruto,
+    rentabilidad_bruta_pct = EXCLUDED.rentabilidad_bruta_pct,
+    ebitda_no_extras = EXCLUDED.ebitda_no_extras,
+    rentabilidad_operativa_pct = EXCLUDED.rentabilidad_operativa_pct,
+    ebitda_real = EXCLUDED.ebitda_real,
+    rentabilidad_real_pct = EXCLUDED.rentabilidad_real_pct,
+    pct_comision_asesores = EXCLUDED.pct_comision_asesores,
+    break_even = EXCLUDED.break_even,
+    ingresos_margen_10 = EXCLUDED.ingresos_margen_10,
+    ingresos_margen_20 = EXCLUDED.ingresos_margen_20,
+    ingresos_margen_30 = EXCLUDED.ingresos_margen_30,
+    ingresos_margen_40 = EXCLUDED.ingresos_margen_40,
+    break_even_con_extras = EXCLUDED.break_even_con_extras,
+    ingresos_margen_10_con_extras = EXCLUDED.ingresos_margen_10_con_extras,
+    ingresos_margen_20_con_extras = EXCLUDED.ingresos_margen_20_con_extras,
+    ingresos_margen_30_con_extras = EXCLUDED.ingresos_margen_30_con_extras,
+    ingresos_margen_40_con_extras = EXCLUDED.ingresos_margen_40_con_extras,
+    actualizado_at = NOW();
