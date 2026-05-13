@@ -21,6 +21,35 @@ Próximos sprints deberían enfocarse en (a) sustituir el mock por datos reales,
 
 ---
 
+## 🟡 Discrepancias en observación — verificar con contabilidad
+
+### P-18 · Diferencias calculator vs PDF de abril 2026
+
+Tras integrar el calculator (lectura Postgres), 7 campos del slide 2 no cuadran con el PDF de abril 2026 que se generó a mano:
+
+| Campo | Manual (PDF) | Calculator | Dif |
+|---|---|---|---|
+| `reservas_totales` | 547.139 € | 541.039 € | -6.100 € |
+| `reservas_mes_anterior` | 585.720 € | 580.930 € | -4.790 € |
+| `contratos_firmados` | 510.842 € | 500.266 € | -10.576 € |
+| `n_ops_contratos` | 41 | 38 | -3 ops |
+| `contratos_año_anterior` | 388.808 € | 329.950 € | -58.858 € |
+
+Diferencias consistentes: `ventas_comerciales` cuenta MENOS que los cuadros manuales del Sheet.
+
+**Hipótesis:**
+- Operaciones faltantes en la migración a `ventas_comerciales`.
+- Alquileres registrados en otra tabla.
+- Filtros distintos (por ejemplo, condicionadas).
+
+**Acción:** validar con contabilidad antes de generar el primer informe real. Mostrar los números del calculator + diferencia y preguntar dónde están las operaciones que faltan.
+
+**Lo que SÍ se ha confirmado correcto** (no requiere acción):
+- Pequeñas diferencias por redondeo en mock (margen_bruto, rentabilidad_op, resultado_op, ingresos_totales).
+- `var_rentab_mom` del mock estaba mal calculada aritméticamente.
+
+---
+
 ## 🔥 Bloqueantes / Decisiones externas
 
 ### P-01 · Migración a cuenta corporativa Google
