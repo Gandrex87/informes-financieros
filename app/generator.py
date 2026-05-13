@@ -13,9 +13,14 @@ from pathlib import Path
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
+from app.color_helpers import apply_color_overrides
 from app.token_helpers import expand_lists
 
 logger = logging.getLogger(__name__)
+
+
+# Clave especial en el payload que define color condicional por token.
+COLOR_OVERRIDES_KEY = "_color_overrides"
 
 
 # Especificacion de listas que se expanden a slots numerados antes de
@@ -149,8 +154,12 @@ def generate_report(
     template_id = template_id or os.environ["SLIDES_TEMPLATE_ID"]
     folder_id = folder_id if folder_id is not None else os.environ.get("DRIVE_FOLDER_ID", "").strip()
 
-    expanded = expand_lists(data, LIST_SPECS)
-    logger.info("Datos: %d campos originales, %d tokens tras expandir.", len(data), len(expanded))
+    # Extraer overrides de color (no son tokens, no se pasan a replaceAllText).
+    color_overrides = data.get(COLOR_OVERRIDES_KEY, {}) or {}
+    data_clean = {k: v for k, v in data.items() if k != COLOR_OVERRIDES_KEY}
+
+    expanded = expand_lists(data_clean, LIST_SPECS)
+    logger.info("Datos: %d campos originales, %d tokens tras expandir.", len(data_clean), len(expanded))
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     copy_name = f"{copy_name_prefix}_{timestamp}"
@@ -164,6 +173,14 @@ def generate_report(
         logger.info("%d reemplazos efectivos.", total)
         if missing:
             logger.warning("Tokens no encontrados en plantilla: %s", ", ".join(missing))
+
+        if color_overrides:
+            colored, not_found = apply_color_overrides(
+                slides_client, copy_id, color_overrides, expanded
+            )
+            logger.info("%d localizaciones coloreadas.", colored)
+            if not_found:
+                logger.warning("Overrides sin match: %s", ", ".join(not_found))
 
         pdf_bytes = _export_pdf_bytes(drive_client, copy_id)
         logger.info("PDF generado: %d bytes.", len(pdf_bytes))

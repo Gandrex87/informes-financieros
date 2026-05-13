@@ -1,6 +1,8 @@
 # Credenciales — NUNCA subir a git
 credentials/
 
+experiments/
+
 # Variables de entorno
 .env
 .env.local

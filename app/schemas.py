@@ -20,12 +20,17 @@ class GenerarInformeRequest(BaseModel):
 
     Las listas variables (pipeline_alquiler, cobros_pendientes, etc.) van
     embebidas en el mismo payload y se expanden a slots automaticamente.
+
+    Campo opcional especial:
+        _color_overrides: dict {token_name: color_name}, ej.
+            {"margen_30_estado": "rojo", "break_even_estado": "verde"}
+        Los colores disponibles estan definidos en app/colors.py.
     """
 
     sede: str = Field(..., description="Nombre de la sede, ej. 'Valencia'.")
     mes_año: str = Field(..., description="Mes y año en formato 'Abril 2026'.")
 
-    # Permitir cualquier otro campo (el resto de tokens).
+    # Permitir cualquier otro campo (el resto de tokens + _color_overrides).
     model_config = {"extra": "allow"}
 
     def to_data_dict(self) -> dict[str, Any]:

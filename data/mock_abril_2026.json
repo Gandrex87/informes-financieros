@@ -1,4 +1,29 @@
 {
+  "_color_overrides": {
+    "var_reservas_mom": "rojo",
+    "var_contratos_mom": "verde",
+    "var_ingresos_mom": "verde",
+    "var_rentab_mom": "rojo",
+
+    "var_reservas_mom_arrow": "rojo",
+    "var_contratos_mom_arrow": "verde",
+    "var_reservas_yoy": "verde",
+    "var_contratos_yoy": "verde",
+    "var_ticket_medio_mom": "verde",
+
+    "var_reservas_alquiler_mom": "verde",
+    "var_contratos_alquiler_mom": "rojo",
+
+    "rentabilidad_op_signed": "verde",
+    "volumen_riesgo_short": "rojo",
+
+    "break_even_estado": "verde",
+    "margen_10_estado": "verde",
+    "margen_20_estado": "verde",
+    "margen_30_estado": "rojo",
+    "margen_40_estado": "rojo"
+  },
+
   "sede": "Valencia",
   "sede_upper": "VALENCIA",
   "mes_año": "Abril 2026",
