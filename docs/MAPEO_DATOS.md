@@ -364,13 +364,54 @@ sabemos qué subconjunto contemplaba el PDF original. Ver P-20 en
 
 ---
 
-## Slides 6-12 — Pendientes de integrar
+## Slide 6 — Operaciones condicionadas (riesgo operativo)
+
+Tarjeta de alerta a la izquierda + tabla de operaciones a la derecha.
+
+### Tarjeta de alerta (lado izquierdo)
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `volumen_riesgo` | derivado | `SUM(honorarios_totales)` de las condicionadas vivas | ✅ |
+| `n_ops_condicionadas` | derivado | `COUNT(*)` de las condicionadas vivas | ✅ |
+| `impacto_facturacion` | derivado | Etiqueta semántica según `volumen_riesgo` (ver clasificación abajo) | ✅ |
+
+### Clasificación de severidad (`impacto_facturacion`)
+
+| Rango | Etiqueta | Color del `volumen_riesgo` |
+|---|---|---|
+| `> 80.000 €` | `Crítico` | rojo |
+| `> 30.000 €` y `<= 80.000 €` | `Alto` | amarillo |
+| `<= 30.000 €` (incluye 0 y NULL) | `Estable` | verde |
+
+El color de `volumen_riesgo` se aplica via `_color_overrides` desde el calculator (no es color fijo de plantilla). Función `_clasifica_impacto()` en `calculator.py`.
+
+### Tabla de operaciones condicionadas (lado derecho)
+
+Lista variable, una fila por operación. Slots `condicionada_N_nombre` + `condicionada_N_importe` con `n_max=12` via `LIST_SPECS`.
+
+**Filtro:**
+```sql
+WHERE pendiente_fecha_condicionada = TRUE
+ORDER BY honorarios_totales DESC
+```
+
+`pendiente_fecha_condicionada` es un campo BOOLEAN específico de operaciones de venta condicionadas que aún no se han liberado. El flag es exclusivo de ventas (no aparece en alquileres por convención de la ingesta), así que no se filtra por tipo.
+
+**No se agrupa por inmueble**: pueden aparecer 3 filas de `C. Mercat 47` si hay 3 arras condicionadas distintas en esa propiedad. Cada una tiene su propio importe.
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `operaciones_condicionadas` (lista) | VC | items `{nombre, importe}` con N filas | ✅ |
+
+---
+
+## Slides 7-12 — Pendientes de integrar
 
 Listado resumido. Cada uno tendrá su sección detallada cuando se ataque.
 
 | Slide | Contenido | Fuentes esperadas | Notas |
 |---|---|---|---|
-| 6 | Operaciones condicionadas | VC `WHERE condicionadas='SI' AND fecha_no_condicionada IS NULL` | Tabla `n_max=12` |
 | 7 | Cobros pendientes | tabla nueva (¿`cobros_pendientes`?) — fuente sin confirmar | Tabla 2 columnas, `n_max=20` |
 | 8 | Break Even abril | CM (break_even, ingresos_margen_*, ebitda) + narrativa | Narrativa templating determinista (P-07) |
 | 9 | Comisiones directores | VC (cobradas mes) + CM (% comisión) + tabla atrasos | Multi-fuente, tabla `n_max=10` |

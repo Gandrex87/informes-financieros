@@ -6,8 +6,9 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 - **Sprint 3** ✅: colores condicionales (P-04) + integración Postgres real para slides 1, 2 y 3 (lado izquierdo).
 - **Sprint 4** ✅: documentación (`docs/MAPEO_DATOS.md`) + gráfico del slide 3 (P-05) + slide 4 completo (KPIs + pipeline pendiente).
 - **Sprint 5** ✅: slide 5 completo (pipeline ventas + obra nueva + alquileres + totales agregados).
+- **Sprint 6** ✅: slide 6 completo (operaciones condicionadas + tarjeta de alerta con severidad y color condicional).
 
-Próximos pasos: extender calculator a slides 6-12, validar P-18 y P-20 con contabilidad, operacionalización (cuenta corporativa).
+Próximos pasos: extender calculator a slides 7-12, validar P-18 y P-20 con contabilidad, operacionalización (cuenta corporativa).
 
 ---
 
@@ -60,6 +61,14 @@ Próximos pasos: extender calculator a slides 6-12, validar P-18 y P-20 con cont
 - DISTINCT defensivo contra P-19 en pipeline ventas.
 - Totales agregados: `total_ventas_pipeline`, `total_obra_nueva`, `total_pipeline` (suma de los tres), `n_ops_pipeline`.
 - Discrepancia P-20 documentada (Altos de Santa Bárbara da 587k vs 505k del PDF).
+- Token global del slide: `trimestre` (Q1/Q2/Q3/Q4 derivado del mes).
+
+### Slide 6 — Operaciones condicionadas (riesgo operativo)
+- Query nueva: `_query_operaciones_condicionadas()` filtrada por `pendiente_fecha_condicionada = TRUE` (flag específico de ventas condicionadas vivas).
+- Tabla de operaciones individuales (sin agrupar por inmueble) con `n_max=12`.
+- Tarjeta de alerta con etiqueta semántica `impacto_facturacion` ("Crítico" / "Alto" / "Estable") y color condicional del `volumen_riesgo` (rojo / amarillo / verde).
+- Función `_clasifica_impacto()` con rangos: `>80k Crítico`, `>30k Alto`, `<=30k Estable`.
+- Color override del importe `volumen_riesgo` aplicado dinámicamente desde el calculator (no color fijo de plantilla).
 
 ### Documentación
 - `docs/MAPEO_DATOS.md`: tabla por slide con tokens, fuentes, fórmulas y estado.
@@ -312,13 +321,13 @@ Bajo coste de implementación, alto valor antes de exponer públicamente.
 
 Orden sugerido (cada uno desbloquea o aporta valor visible):
 
-1. **Extender calculator a slide 6** (operaciones condicionadas) — siguiente en orden visual.
+1. **Extender calculator a slide 7** (cobros pendientes) — siguiente en orden visual.
 2. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
 3. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
 4. **P-18 y P-20** — validar discrepancias con contabilidad (acción externa, en paralelo).
 5. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
 6. **P-12** — comando de validación de tokens (productividad, opcional).
-7. **Calculator slides 7, 9** — los más complejos (cobros pendientes, comisiones con atrasos).
+7. **Calculator slide 9** — comisiones con atrasos (complejo: multi-fuente).
 8. **P-01** — migración cuenta corporativa (cuando se confirme).
 9. **P-15** — workflow n8n con datos reales (depende del calculator completo).
 10. **P-17** — API Key antes de pasar a producción.

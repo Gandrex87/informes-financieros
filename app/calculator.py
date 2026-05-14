@@ -313,6 +313,48 @@ def _query_obra_nueva() -> list[dict]:
     return [{"nombre": r["promocion"], "honorarios": r["total_honorarios"]} for r in rows]
 
 
+def _query_operaciones_condicionadas() -> list[dict]:
+    """Operaciones condicionadas vivas (slide 6).
+
+    Filtro: pendiente_fecha_condicionada = TRUE.
+    Este flag es exclusivo de ventas (no aparece en alquileres por convencion
+    de la ingesta), asi que no hace falta filtrar por tipo.
+
+    Cada fila es una operacion individual. No se agrupa por inmueble: cada
+    arras condicionada tiene su propio importe.
+
+    Ordenado por honorarios descendente.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    sql = f"""
+        SELECT inmueble, honorarios_totales
+        FROM {schema}.ventas_comerciales
+        WHERE pendiente_fecha_condicionada = TRUE
+        ORDER BY honorarios_totales DESC NULLS LAST;
+    """
+    with connection() as conn:
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+    return [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
+
+
+def _clasifica_impacto(volumen_riesgo: Decimal | None) -> tuple[str, str]:
+    """Devuelve (etiqueta, color) segun el volumen en riesgo.
+
+    Rangos acordados:
+        > 80.000        -> 'Crítico'  (rojo)
+        > 30.000 y <=80k -> 'Alto'     (amarillo)
+        <= 30.000       -> 'Estable'  (verde)
+
+    Si volumen es None o 0: 'Estable' (verde).
+    """
+    if volumen_riesgo is None or volumen_riesgo <= Decimal("30000"):
+        return ("Estable", "verde")
+    if volumen_riesgo <= Decimal("80000"):
+        return ("Alto", "amarillo")
+    return ("Crítico", "rojo")
+
+
 def _query_pipeline_alquileres() -> list[dict]:
     """Lista de alquileres con señal pero sin contrato firmado todavia.
 
@@ -405,6 +447,9 @@ def build_payload_slide_2(
     # Slide 5: pipeline Q2 (ventas + obra nueva)
     pipeline_ventas_rows = _query_pipeline_ventas()
     obra_nueva_rows = _query_obra_nueva()
+
+    # Slide 6: operaciones condicionadas
+    condicionadas_rows = _query_operaciones_condicionadas()
 
     if cont_actual is None:
         raise ValueError(
@@ -506,6 +551,18 @@ def build_payload_slide_2(
         + n_ops_pipeline_alquiler
     )
 
+    # --- Calculos especificos del slide 6 (operaciones condicionadas) ---
+    operaciones_condicionadas = [
+        {"nombre": row["inmueble"], "importe": format_euro(row["honorarios"])}
+        for row in condicionadas_rows
+    ]
+    volumen_riesgo = sum(
+        (Decimal(str(row["honorarios"])) if row["honorarios"] else Decimal(0))
+        for row in condicionadas_rows
+    )
+    n_ops_condicionadas = len(condicionadas_rows)
+    impacto_etiqueta, impacto_color = _clasifica_impacto(volumen_riesgo)
+
     # Ticket medio = contratos_firmados / n_ops_contratos
     ticket_medio = None
     if com_actual.arras_n_ops > 0 and com_actual.arras_total is not None:
@@ -541,6 +598,8 @@ def build_payload_slide_2(
         color_overrides["var_reservas_alquiler_mom"] = "verde" if var_reservas_alquiler_mom >= 0 else "rojo"
     if var_contratos_alquiler_mom is not None:
         color_overrides["var_contratos_alquiler_mom"] = "verde" if var_contratos_alquiler_mom >= 0 else "rojo"
+    # Slide 6: color del volumen_riesgo segun severidad
+    color_overrides["volumen_riesgo"] = impacto_color
 
     # --- Tramo de comision: por ahora hardcoded, vendra de parametros_sede_mes ---
     tramo_comision = "3 %"
@@ -638,6 +697,12 @@ def build_payload_slide_2(
         "total_pipeline_alquiler": format_euro(total_pipeline_alquiler),
         "n_ops_pipeline_alquiler": format_int(n_ops_pipeline_alquiler),
         "nota_pipeline_alquiler": "",  # vacia por ahora (decision tomada)
+
+        # --- Slide 6: Operaciones condicionadas ---
+        "operaciones_condicionadas": operaciones_condicionadas,
+        "volumen_riesgo": format_euro(volumen_riesgo),
+        "n_ops_condicionadas": format_int(n_ops_condicionadas),
+        "impacto_facturacion": impacto_etiqueta,
 
         # --- Slide 5: Pipeline Q2 ---
         # Trimestre del mes en curso (Q1, Q2, Q3, Q4)
