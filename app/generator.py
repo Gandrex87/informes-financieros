@@ -13,7 +13,13 @@ from pathlib import Path
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
+from app.chart_generator import DatoPeriodo, generar_grafico_reservas_arras
 from app.color_helpers import apply_color_overrides
+from app.image_helpers import (
+    delete_drive_file,
+    replace_shape_with_image,
+    upload_temp_image,
+)
 from app.token_helpers import expand_lists
 
 logger = logging.getLogger(__name__)
@@ -21,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 # Clave especial en el payload que define color condicional por token.
 COLOR_OVERRIDES_KEY = "_color_overrides"
+
+# Clave del payload con los datos del grafico del slide 3.
+CHART_RESERVAS_ARRAS_KEY = "_chart_reservas_arras"
+CHART_RESERVAS_ARRAS_TOKEN = "{{grafico_reservas_arras}}"
 
 
 # Especificacion de listas que se expanden a slots numerados antes de
@@ -154,9 +164,13 @@ def generate_report(
     template_id = template_id or os.environ["SLIDES_TEMPLATE_ID"]
     folder_id = folder_id if folder_id is not None else os.environ.get("DRIVE_FOLDER_ID", "").strip()
 
-    # Extraer overrides de color (no son tokens, no se pasan a replaceAllText).
+    # Extraer overrides de color y datos de graficos (no son tokens
+    # de replaceAllText, se procesan aparte).
     color_overrides = data.get(COLOR_OVERRIDES_KEY, {}) or {}
-    data_clean = {k: v for k, v in data.items() if k != COLOR_OVERRIDES_KEY}
+    chart_reservas_arras = data.get(CHART_RESERVAS_ARRAS_KEY)
+
+    special_keys = {COLOR_OVERRIDES_KEY, CHART_RESERVAS_ARRAS_KEY}
+    data_clean = {k: v for k, v in data.items() if k not in special_keys}
 
     expanded = expand_lists(data_clean, LIST_SPECS)
     logger.info("Datos: %d campos originales, %d tokens tras expandir.", len(data_clean), len(expanded))
@@ -182,8 +196,33 @@ def generate_report(
             if not_found:
                 logger.warning("Overrides sin match: %s", ", ".join(not_found))
 
+        # Insertar grafico del slide 3 (si vinieron datos en el payload).
+        chart_drive_id = None
+        if chart_reservas_arras:
+            try:
+                periodos = [DatoPeriodo(**p) for p in chart_reservas_arras]
+                png_bytes = generar_grafico_reservas_arras(periodos)
+                chart_drive_id = upload_temp_image(
+                    drive_client, png_bytes, f"_chart_reservas_arras_{copy_id}.png",
+                )
+                count = replace_shape_with_image(
+                    slides_client, copy_id, CHART_RESERVAS_ARRAS_TOKEN, chart_drive_id,
+                )
+                if count == 0:
+                    logger.warning(
+                        "Token '%s' no encontrado en la plantilla; el grafico no se inserto.",
+                        CHART_RESERVAS_ARRAS_TOKEN,
+                    )
+            except Exception as e:
+                logger.exception("Error insertando grafico: %s", e)
+
         pdf_bytes = _export_pdf_bytes(drive_client, copy_id)
         logger.info("PDF generado: %d bytes.", len(pdf_bytes))
+
+        # Limpieza del PNG temporal (mejor esfuerzo).
+        if chart_drive_id:
+            delete_drive_file(drive_client, chart_drive_id)
+
         return pdf_bytes
 
     except HttpError as e:

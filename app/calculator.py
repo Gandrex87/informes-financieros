@@ -114,11 +114,24 @@ OBJETIVO_RENTABILIDAD = "20 %"  # constante corporativa
 
 @dataclass
 class ComercialMes:
-    """Datos comerciales de un mes desde ventas_comerciales."""
+    """Datos comerciales de un mes desde ventas_comerciales (ventas + alquileres)."""
     señales_total: Decimal | None
     señales_n_ops: int
     arras_total: Decimal | None
     arras_n_ops: int
+
+
+@dataclass
+class AlquilerMes:
+    """Datos solo de alquileres de un mes.
+
+    Para alquileres, fecha_arras representa la fecha de firma del CONTRATO
+    (la ingesta hace ese mapeo desde "FECHA CONTRATO" del Sheet).
+    """
+    señales_total: Decimal | None
+    señales_n_ops: int
+    contratos_total: Decimal | None
+    contratos_n_ops: int
 
 
 @dataclass
@@ -180,6 +193,72 @@ def _query_comercial(sede: str, anyo: int, mes: int) -> ComercialMes:
     )
 
 
+def _query_alquileres_mes(anyo: int, mes: int) -> AlquilerMes:
+    """Lee de ventas_comerciales el resumen de alquileres de un mes.
+
+    Filtro: inmueble LIKE 'ALQ.-%' (convencion de la ingesta).
+    Para alquileres, fecha_arras = fecha de firma del contrato.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    sql = f"""
+        SELECT
+            COALESCE(SUM(CASE
+                WHEN fecha_senal >= make_date(%(anyo)s, %(mes)s, 1)
+                 AND fecha_senal < make_date(%(anyo)s, %(mes)s, 1) + INTERVAL '1 month'
+                THEN honorarios_totales END), 0) AS senales_total,
+            COUNT(*) FILTER (WHERE
+                fecha_senal >= make_date(%(anyo)s, %(mes)s, 1)
+            AND fecha_senal < make_date(%(anyo)s, %(mes)s, 1) + INTERVAL '1 month'
+            ) AS senales_n_ops,
+            COALESCE(SUM(CASE
+                WHEN fecha_arras >= make_date(%(anyo)s, %(mes)s, 1)
+                 AND fecha_arras < make_date(%(anyo)s, %(mes)s, 1) + INTERVAL '1 month'
+                 AND arras_firmadas = 'SI'
+                THEN honorarios_totales END), 0) AS contratos_total,
+            COUNT(*) FILTER (WHERE
+                fecha_arras >= make_date(%(anyo)s, %(mes)s, 1)
+            AND fecha_arras < make_date(%(anyo)s, %(mes)s, 1) + INTERVAL '1 month'
+            AND arras_firmadas = 'SI'
+            ) AS contratos_n_ops
+        FROM {schema}.ventas_comerciales
+        WHERE inmueble LIKE 'ALQ.-%%';
+    """
+    with connection() as conn:
+        cur = conn.execute(sql, {"anyo": anyo, "mes": mes})
+        row = cur.fetchone()
+    return AlquilerMes(
+        señales_total=row["senales_total"],
+        señales_n_ops=row["senales_n_ops"],
+        contratos_total=row["contratos_total"],
+        contratos_n_ops=row["contratos_n_ops"],
+    )
+
+
+def _query_pipeline_alquileres() -> list[dict]:
+    """Lista de alquileres con señal pero sin contrato firmado todavia.
+
+    Excluimos:
+    - Las firmadas ('SI').
+    - Las caidas ('CAÍDA - 0', con tilde en la I).
+
+    Sin filtro de mes: incluye señalizaciones de meses anteriores que aun
+    no han firmado. Ordenado por honorarios descendente.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    sql = f"""
+        SELECT inmueble, honorarios_totales
+        FROM {schema}.ventas_comerciales
+        WHERE inmueble LIKE 'ALQ.-%%'
+          AND fecha_senal IS NOT NULL
+          AND (arras_firmadas IS NULL OR arras_firmadas NOT IN ('SI', 'CAÍDA - 0'))
+        ORDER BY honorarios_totales DESC NULLS LAST;
+    """
+    with connection() as conn:
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+    return [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
+
+
 def _query_contable(sede: str, escenario: str, anyo: int, mes: int) -> ContableMes | None:
     schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
     sql = f"""
@@ -239,6 +318,11 @@ def build_payload_slide_2(
     cont_prev = _query_contable(sede, escenario, anyo_prev, mes_prev)
     cont_yoy = _query_contable(sede, escenario, anyo_yoy, mes_yoy)
 
+    # Slide 4: alquileres
+    alq_actual = _query_alquileres_mes(anyo, mes)
+    alq_prev = _query_alquileres_mes(anyo_prev, mes_prev)
+    pipeline_alq_rows = _query_pipeline_alquileres()
+
     if cont_actual is None:
         raise ValueError(
             f"No hay datos contables para sede={sede} escenario={escenario} "
@@ -267,10 +351,50 @@ def build_payload_slide_2(
     arras_mes_anterior = com_prev.arras_total
     arras_anyo_anterior = cont_yoy.arras_firmadas if cont_yoy else None
 
+    # --- Datos del grafico slide 3 (3 periodos x 2 series) ---
+    # No van por replaceAllText; el generator los usa para crear el PNG.
+    chart_periodos = [
+        {
+            "etiqueta": format_mes_short_anyo(anyo_yoy, mes_yoy).replace("'", " '"),
+            "reservas": float(señales_anyo_anterior) if señales_anyo_anterior is not None else 0.0,
+            "contratos": float(arras_anyo_anterior) if arras_anyo_anterior is not None else 0.0,
+        },
+        {
+            "etiqueta": format_mes_short_anyo(anyo_prev, mes_prev).replace("'", " '"),
+            "reservas": float(señales_mes_anterior) if señales_mes_anterior is not None else 0.0,
+            "contratos": float(arras_mes_anterior) if arras_mes_anterior is not None else 0.0,
+        },
+        {
+            "etiqueta": format_mes_short_anyo(anyo, mes).replace("'", " '"),
+            "reservas": float(com_actual.señales_total) if com_actual.señales_total is not None else 0.0,
+            "contratos": float(com_actual.arras_total) if com_actual.arras_total is not None else 0.0,
+        },
+    ]
+
     # --- Calculos especificos del slide 3 ---
     # Variaciones YoY (comparativa interanual)
     var_reservas_yoy = _variacion(com_actual.señales_total, señales_anyo_anterior)
     var_contratos_yoy = _variacion(com_actual.arras_total, arras_anyo_anterior)
+
+    # --- Calculos especificos del slide 4 (alquileres) ---
+    var_reservas_alquiler_mom = _variacion(alq_actual.señales_total, alq_prev.señales_total)
+    var_contratos_alquiler_mom = _variacion(alq_actual.contratos_total, alq_prev.contratos_total)
+    delta_ops_reservas_alquiler = alq_actual.señales_n_ops - alq_prev.señales_n_ops
+    delta_ops_contratos_alquiler = alq_actual.contratos_n_ops - alq_prev.contratos_n_ops
+
+    # Pipeline alquileres: lista para expand_lists. Prefijo de nombre con
+    # el caracter Unicode de barra (ya usamos esa convencion).
+    pipeline_alquiler = [
+        {
+            "nombre": f"▌ {_limpia_inmueble_alq(row['inmueble'])}",
+            "importe": format_euro(row["honorarios"]),
+        }
+        for row in pipeline_alq_rows
+    ]
+    total_pipeline_alquiler = sum(
+        (row["honorarios"] or 0) for row in pipeline_alq_rows
+    )
+    n_ops_pipeline_alquiler = len(pipeline_alq_rows)
 
     # Ticket medio = contratos_firmados / n_ops_contratos
     ticket_medio = None
@@ -302,12 +426,18 @@ def build_payload_slide_2(
         color_overrides["var_contratos_yoy"] = "verde" if var_contratos_yoy >= 0 else "rojo"
     if var_ticket_medio_mom is not None:
         color_overrides["var_ticket_medio_mom"] = "verde" if var_ticket_medio_mom >= 0 else "rojo"
+    # Slide 4
+    if var_reservas_alquiler_mom is not None:
+        color_overrides["var_reservas_alquiler_mom"] = "verde" if var_reservas_alquiler_mom >= 0 else "rojo"
+    if var_contratos_alquiler_mom is not None:
+        color_overrides["var_contratos_alquiler_mom"] = "verde" if var_contratos_alquiler_mom >= 0 else "rojo"
 
     # --- Tramo de comision: por ahora hardcoded, vendra de parametros_sede_mes ---
     tramo_comision = "3 %"
 
     return {
         "_color_overrides": color_overrides,
+        "_chart_reservas_arras": chart_periodos,
 
         # Identificacion
         "sede": sede,
@@ -379,4 +509,36 @@ def build_payload_slide_2(
         "ticket_medio": format_euro(ticket_medio),
         "ticket_medio_mes_anterior": format_euro(ticket_medio_prev),
         "var_ticket_medio_mom": format_pct_signed(var_ticket_medio_mom, decimales=1),
+
+        # --- Slide 4: Gestion de alquileres ---
+        # Tarjeta Reservas (señales)
+        "reservas_alquiler": format_euro(alq_actual.señales_total),
+        "var_reservas_alquiler_mom": format_pct_with_arrow(var_reservas_alquiler_mom, decimales=2),
+        "n_ops_reservas_alquiler": format_int(alq_actual.señales_n_ops),
+        "delta_ops_reservas_alquiler": format_int_signed(delta_ops_reservas_alquiler, suffix="op."),
+
+        # Tarjeta Contratos firmados
+        "contratos_alquiler": format_euro(alq_actual.contratos_total),
+        "var_contratos_alquiler_mom": format_pct_with_arrow(var_contratos_alquiler_mom, decimales=2),
+        "n_ops_contratos_alquiler": format_int(alq_actual.contratos_n_ops),
+        "delta_ops_contratos_alquiler": format_int_signed(delta_ops_contratos_alquiler, suffix="ops."),
+
+        # Pipeline pendiente de firma (lista que se expandira a slots)
+        "pipeline_alquiler": pipeline_alquiler,
+        "total_pipeline_alquiler": format_euro(total_pipeline_alquiler),
+        "n_ops_pipeline_alquiler": format_int(n_ops_pipeline_alquiler),
+        "nota_pipeline_alquiler": "",  # vacia por ahora (decision tomada)
     }
+
+
+def _limpia_inmueble_alq(inmueble: str) -> str:
+    """Quita el prefijo 'ALQ.-' de los nombres de inmuebles de alquiler.
+
+    Ej: 'ALQ.- C. Pintor Domingo 42' -> 'C. Pintor Domingo 42'.
+    """
+    if not inmueble:
+        return ""
+    prefijo = "ALQ.-"
+    if inmueble.startswith(prefijo):
+        return inmueble[len(prefijo):].strip()
+    return inmueble.strip()

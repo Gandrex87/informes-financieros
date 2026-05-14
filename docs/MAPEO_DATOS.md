@@ -165,22 +165,96 @@ Mismo patrón que la tarjeta anterior, pero para `contratos_*` y filtrado por `f
 | `var_contratos_yoy` | ≥ 0 | < 0 |
 | `var_ticket_medio_mom` | ≥ 0 | < 0 |
 
-### Lado derecho — Gráfico (pendiente)
+### Lado derecho — Gráfico de barras ✅
 
-Gráfico de barras: 3 períodos (Abr'25, Mar'26, Abr'26) × 2 series (Reservas, Contratos Firmados).
+Gráfico de barras agrupadas: 3 períodos (`Abr '25`, `Mar '26`, `Abr '26`) × 2 series (Reservas, Contratos Firmados).
 
-**Estado:** ⏳ pendiente. Ver P-05 en PENDIENTES.md. Camino acordado: generar PNG con matplotlib → subir a Drive → `insertImage` en placeholder del slide → borrar PNG.
+**Estado:** ✅ integrado.
+
+**Implementación:**
+- Generado con matplotlib en `app/chart_generator.py` (función `generar_grafico_reservas_arras`).
+- Paleta: barras Reservas `#F6B26B` (melocotón), barras Contratos `#7AB8E5` (azul claro). Fondo transparente. Etiquetas del color de su barra.
+- El PNG se sube temporalmente a Drive, se sustituye en la plantilla con `replaceAllShapesWithImage` apuntando al token `{{grafico_reservas_arras}}`, y se borra de Drive tras exportar el PDF.
+- Helpers: `app/image_helpers.py` (upload, replace, cleanup).
+
+**Datos:** los 6 valores (3 períodos × 2 series) vienen del calculator en el campo especial `_chart_reservas_arras` del payload (no es un token, no pasa por `replaceAllText`).
 
 ---
 
-## Slides 4-12 — Pendientes de integrar
+## Slide 4 — Gestión de alquileres
+
+Dos tarjetas con KPIs de alquileres + lista pipeline pendiente de firma.
+
+### Convención clave
+
+Para alquileres, **`fecha_arras`** representa la **fecha de firma del contrato**
+(la ingesta hace ese mapeo desde "FECHA CONTRATO" del Sheet). El nombre de la
+columna se mantiene por compatibilidad con ventas, pero su significado en
+alquileres es distinto.
+
+Filtro base de todos los queries de alquileres: `inmueble LIKE 'ALQ.-%'`.
+
+### Tarjeta · Reservas (señales)
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `reservas_alquiler` | VC | `SUM(honorarios_totales) WHERE alquiler AND fecha_senal en el mes` | ✅ |
+| `var_reservas_alquiler_mom` | derivado | `(reservas_alq_actual - reservas_alq_mes-1) / reservas_alq_mes-1` con flecha `▲`/`▼` | ✅ |
+| `n_ops_reservas_alquiler` | VC | `COUNT(*) WHERE alquiler AND fecha_senal en el mes` | ✅ |
+| `delta_ops_reservas_alquiler` | derivado | `n_ops_actual - n_ops_mes-1` con sufijo `op.` | ✅ |
+
+### Tarjeta · Contratos firmados
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `contratos_alquiler` | VC | `SUM(honorarios_totales) WHERE alquiler AND fecha_arras en el mes AND arras_firmadas='SI'` | ✅ |
+| `var_contratos_alquiler_mom` | derivado | con flecha `▲`/`▼` | ✅ |
+| `n_ops_contratos_alquiler` | VC | `COUNT(*)` con mismo filtro que `contratos_alquiler` | ✅ |
+| `delta_ops_contratos_alquiler` | derivado | con sufijo `ops.` | ✅ |
+
+### Pipeline pendiente de firma (lista variable)
+
+Operaciones de alquiler que se han señalizado pero aún no han firmado contrato.
+**Sin filtro de mes** — incluye señalizaciones de meses anteriores que siguen vivas.
+
+**Filtro:**
+```sql
+WHERE inmueble LIKE 'ALQ.-%'
+  AND fecha_senal IS NOT NULL
+  AND (arras_firmadas IS NULL OR arras_firmadas NOT IN ('SI', 'CAÍDA - 0'))
+```
+
+Exclusiones explícitas:
+- `'SI'`: ya firmadas (no son pendiente).
+- `'CAÍDA - 0'`: operaciones canceladas (atención: con tilde en la `Í`).
+
+**Orden:** por `honorarios_totales DESC`.
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `pipeline_alquiler` (lista) | VC | items con `{nombre, importe}`; el nombre quita el prefijo `ALQ.-` y antepone `▌` (barra visual) | ✅ |
+| `total_pipeline_alquiler` | derivado | `SUM(honorarios_totales)` del pipeline | ✅ |
+| `n_ops_pipeline_alquiler` | derivado | `COUNT(*)` del pipeline | ✅ |
+| `nota_pipeline_alquiler` | constante vacía | reservado para texto manual ("* Las 3 operaciones firmadas..."), no automatizable hoy | ⏳ |
+
+La lista se expande automáticamente a slots `pipeline_alq_N_nombre` y `pipeline_alq_N_importe` con `n_max=8` via `LIST_SPECS` del generator.
+
+### Colores condicionales del slide 4
+
+| Token | Verde si | Rojo si |
+|---|---|---|
+| `var_reservas_alquiler_mom` | ≥ 0 | < 0 |
+| `var_contratos_alquiler_mom` | ≥ 0 | < 0 |
+
+---
+
+## Slides 5-12 — Pendientes de integrar
 
 Listado resumido. Cada uno tendrá su sección detallada cuando se ataque.
 
 | Slide | Contenido | Fuentes esperadas | Notas |
 |---|---|---|---|
-| 4 | Gestión alquileres | VC filtrando `inmueble LIKE 'ALQ.-%%'` + lista pipeline | Patrón slots variables (`n_max=8`) ya en plantilla |
-| 5 | Pipeline Q2 | VC con `estado='pendiente'` + 3 listas (ventas/alquiler/obra nueva) | 3 columnas variables |
+| 5 | Pipeline Q2 | VC con `arras_firmadas != 'SI'` + 3 listas (ventas/alquiler/obra nueva) | 3 columnas variables |
 | 6 | Operaciones condicionadas | VC `WHERE condicionadas='SI' AND fecha_no_condicionada IS NULL` | Tabla `n_max=12` |
 | 7 | Cobros pendientes | tabla nueva (¿`cobros_pendientes`?) — fuente sin confirmar | Tabla 2 columnas, `n_max=20` |
 | 8 | Break Even abril | CM (break_even, ingresos_margen_*, ebitda) + narrativa | Narrativa templating determinista (P-07) |

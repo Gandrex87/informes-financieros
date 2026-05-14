@@ -4,9 +4,9 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 - **Sprint 1** ✅: tokenización completa de los 12 slides + pipeline funcional con datos mock locales.
 - **Sprint 2** ✅: servicio FastAPI + dockerización + integración con n8n local. Validado end-to-end: n8n llama al servicio en red Docker compartida y recibe el PDF.
 - **Sprint 3** ✅: colores condicionales (P-04) + integración Postgres real para slides 1, 2 y 3 (lado izquierdo).
-- **Sprint 4 (en curso)**: documentación de fuentes de datos (`docs/MAPEO_DATOS.md`). Próximo: gráfico del slide 3 (P-05).
+- **Sprint 4** ✅: documentación (`docs/MAPEO_DATOS.md`) + gráfico del slide 3 (P-05) + slide 4 completo (KPIs + pipeline pendiente).
 
-Próximos pasos: (a) cerrar el slide 3 con el gráfico (P-05), (b) extender calculator a slides 4-12, (c) operacionalización (cuenta corporativa, observabilidad).
+Próximos pasos: extender calculator a slides 5-12, validar P-18 con contabilidad, operacionalización (cuenta corporativa).
 
 ---
 
@@ -29,13 +29,27 @@ Próximos pasos: (a) cerrar el slide 3 con el gráfico (P-05), (b) extender calc
 - Convención declarativa: el cliente envía `_color_overrides` en el payload; el servicio aplica sin interpretar valores.
 - Aplicado en slides 2, 3, 4, 8, 11.
 
-### Integración Postgres (slides 1, 2 y 3 lado izquierdo)
+### Integración Postgres (slides 1, 2, 3 y 4 completos)
 - Schema `informes_financieros.contabilidad_mensual` con PK `(sede, escenario, anyo, mes)`.
 - Workflow n8n carga el cuadro contable del Sheet (rango `B62:V107`) con upsert `ON CONFLICT`.
 - Calculator (`app/calculator.py`) lee de `ventas_comerciales` + `contabilidad_mensual` y compone el payload.
 - Formatter (`app/formatter.py`) con locale es_ES manual (sin dependencia del SO): euros, porcentajes, deltas, flechas `▲`/`▼` automáticas, meses.
 - Color overrides emitidos automáticamente por el calculator según signo de cada variación.
 - Discrepancias documentadas en P-18.
+
+### Gráfico del slide 3 (P-05 — cerrado)
+- `app/chart_generator.py` con matplotlib: gráfico de barras agrupadas Reservas vs Contratos.
+- `app/image_helpers.py`: sube PNG temporal a Drive con permiso público, `replaceAllShapesWithImage`, cleanup.
+- Paleta corporativa: `#F6B26B` (melocotón) para Reservas, `#7AB8E5` (azul claro) para Contratos. Fondo transparente. Etiquetas del color de su barra.
+- Token placeholder en plantilla: `{{grafico_reservas_arras}}`.
+- Datos del payload en clave especial `_chart_reservas_arras` (no es token, no pasa por `replaceAllText`).
+
+### Slide 4 — Gestión de alquileres
+- Queries especializadas para alquileres en el calculator (`_query_alquileres_mes`, `_query_pipeline_alquileres`).
+- Convención: `fecha_arras` representa fecha de firma del contrato para alquileres (la ingesta hace el mapeo desde "FECHA CONTRATO").
+- Pipeline pendiente excluye estados `'SI'` (ya firmadas) y `'CAÍDA - 0'` (con tilde, etiqueta exacta de la BD). Ordenado por importe descendente.
+- Helper `_limpia_inmueble_alq()` para quitar el prefijo `ALQ.-` del nombre.
+- 2 nuevos color overrides condicionales (`var_reservas_alquiler_mom`, `var_contratos_alquiler_mom`).
 
 ### Documentación
 - `docs/MAPEO_DATOS.md`: tabla por slide con tokens, fuentes, fórmulas y estado.
@@ -125,24 +139,6 @@ Esperando referencias a las hojas con:
 ---
 
 ## 🚧 Funcionalidad pendiente
-
-### P-05 · Gráfico del slide 3 (Reservas vs Arras) — SIGUIENTE
-**Estado:** no iniciado. Hoy el gráfico está hardcodeado en la plantilla.
-
-Gráfico de barras: 3 períodos (Abr'25, Mar'26, Abr'26) × 2 series (Reservas, Contratos Firmados).
-
-**Camino acordado:**
-1. Generar el gráfico con `matplotlib` → PNG.
-2. Subir el PNG temporalmente a Drive (en la carpeta de la copia de Slides).
-3. `replaceAllShapesWithImage` o `insertImage` sobre un placeholder pre-definido.
-4. Borrar el PNG tras exportar el PDF.
-
-**Decisiones a tomar:**
-- Paleta de colores (debe coincidir con branding).
-- Cómo identificar la región de inserción (object ID estable vs coordenadas).
-- ¿Eliminar el gráfico estático actual o usarlo como placeholder?
-
----
 
 ### P-07 · Generación determinista de la narrativa
 **Estado:** hardcoded en el JSON mock. Decidir patrón antes de integrar Postgres.
@@ -270,16 +266,14 @@ Bajo coste de implementación, alto valor antes de exponer públicamente.
 
 Orden sugerido (cada uno desbloquea o aporta valor visible):
 
-1. **P-05** — gráfico del slide 3 con matplotlib (siguiente paso natural — cierra slide 3).
-2. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
-3. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
-4. **Extender calculator a slide 4** (gestión alquileres) — VC filtrando alquileres.
-5. **P-18** — validar discrepancias con contabilidad (acción externa, en paralelo).
-6. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
-7. **P-12** — comando de validación de tokens (productividad, opcional).
-8. **Calculator slides 5, 6, 7, 9** — los más complejos (listas variables con queries por estado/condición).
-9. **P-01** — migración cuenta corporativa (cuando se confirme).
-10. **P-15** — workflow n8n con datos reales (depende del calculator completo).
-11. **P-17** — API Key antes de pasar a producción.
-12. **P-16** — despliegue al servidor.
-13. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).
+1. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
+2. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
+3. **P-18** — validar discrepancias con contabilidad (acción externa, en paralelo).
+4. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
+5. **P-12** — comando de validación de tokens (productividad, opcional).
+6. **Calculator slides 5, 6, 7, 9** — los más complejos (listas variables con queries por estado/condición).
+7. **P-01** — migración cuenta corporativa (cuando se confirme).
+8. **P-15** — workflow n8n con datos reales (depende del calculator completo).
+9. **P-17** — API Key antes de pasar a producción.
+10. **P-16** — despliegue al servidor.
+11. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).
