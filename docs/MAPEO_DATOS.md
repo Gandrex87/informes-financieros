@@ -406,17 +406,67 @@ ORDER BY honorarios_totales DESC
 
 ---
 
-## Slides 7-12 — Pendientes de integrar
+## Slide 11 — Semáforo estratégico
+
+Tres columnas semánticas con código de color: Fortalezas (verde), En observación (amarillo), Riesgo crítico (rojo).
+
+### Decisión arquitectónica: asignación FIJA
+
+Los KPIs de cada columna están **hardcodeados en la plantilla**. No hay lógica
+dinámica que reasigne KPIs según valor. Si la rentabilidad fuera negativa,
+seguiría apareciendo en "Fortalezas" — el color del valor sí cambia.
+
+**Alternativa rechazada:** asignación dinámica (mover KPIs entre columnas según
+valor). Implicaría reorganizar shapes via Slides API en cada generación, lo
+cual es complejo y frágil. La pista visual del color condicional ya transmite
+el sentido.
+
+### Tokens reutilizados (vienen de otros slides)
+
+| Token | Origen | Notas |
+|---|---|---|
+| `ticket_medio` | Slide 3 | — |
+| `var_ticket_medio_mom` | Slide 3 | Hereda color verde/rojo según signo. |
+| `objetivo_rentabilidad` | Slide 2 | Constante hardcoded `"20 %"`. |
+| `n_ops_condicionadas` | Slide 6 | — |
+
+### Tokens nuevos del slide 11
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `var_reservas_mom_observacion` | derivado | Mismo valor que `var_reservas_mom` del slide 2, token distinto para color independiente | ✅ |
+| `var_contratos_mom_observacion` | derivado | Mismo valor que `var_contratos_mom` del slide 2, token distinto para color independiente | ✅ |
+| `rentabilidad_op_signed` | CM | `format_pct_signed(rentabilidad_operativa_pct)` — siempre con `+`/`-` explícito | ✅ |
+| `volumen_riesgo_short` | derivado | `format_euro_compacto(volumen_riesgo)` — formato `135,9 k €` (sufijo k/M) | ✅ |
+| `mes_siguiente_capitalizado` | derivado | Nombre del mes siguiente capitalizado (`Mayo`, `Junio`...). Usado en la narrativa "facturación de X será severo" | ✅ |
+
+**Por qué tokens `_observacion` separados:**
+
+El mecanismo de colores busca shapes por texto del valor. Si `var_reservas_mom` con valor `-6,6 %` apareciera en slide 2 (color rojo por negativo) y slide 11 (color amarillo en columna observación), no se podrían distinguir. Tokens separados con el mismo valor pero distinto nombre resuelven el conflicto.
+
+### Colores condicionales del slide 11
+
+| Token | Verde si | Amarillo si | Rojo si |
+|---|---|---|---|
+| `rentabilidad_op_signed` | ≥ 20 % (objetivo) | — | < 20 % |
+| `volumen_riesgo_short` | volumen ≤ 30k € | volumen 30k-80k € | volumen > 80k € |
+| `var_reservas_mom_observacion` | — | siempre (semántica de la columna) | — |
+| `var_contratos_mom_observacion` | — | siempre (semántica de la columna) | — |
+
+`rentabilidad_op_signed` y `volumen_riesgo_short` heredan los umbrales del slide 6 (`_clasifica_impacto`) y del objetivo corporativo (`OBJETIVO_RENTABILIDAD`).
+
+---
+
+## Slides 7, 8, 9, 10, 12 — Pendientes de integrar
 
 Listado resumido. Cada uno tendrá su sección detallada cuando se ataque.
 
 | Slide | Contenido | Fuentes esperadas | Notas |
 |---|---|---|---|
-| 7 | Cobros pendientes | tabla nueva (¿`cobros_pendientes`?) — fuente sin confirmar | Tabla 2 columnas, `n_max=20` |
+| 7 | Cobros pendientes | tabla nueva (¿`cobros_pendientes`?) — fuente sin confirmar | Tabla 2 columnas, `n_max=20`. Pausado hasta confirmar fuente. |
 | 8 | Break Even abril | CM (break_even, ingresos_margen_*, ebitda) + narrativa | Narrativa templating determinista (P-07) |
 | 9 | Comisiones directores | VC (cobradas mes) + CM (% comisión) + tabla atrasos | Multi-fuente, tabla `n_max=10` |
 | 10 | Break Even mayo (proyección) | CM mes+1 (proyectados) | Mismo patrón que slide 8 sin narrativa |
-| 11 | Semáforo estratégico | reutiliza tokens de slides 2, 3, 6 | Mayoría heredada |
 | 12 | Hoja de ruta | tokens derivados de slides 5, 6, 7 + constantes | Mayoría agregados |
 
 ---

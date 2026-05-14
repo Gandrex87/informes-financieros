@@ -7,8 +7,9 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 - **Sprint 4** ✅: documentación (`docs/MAPEO_DATOS.md`) + gráfico del slide 3 (P-05) + slide 4 completo (KPIs + pipeline pendiente).
 - **Sprint 5** ✅: slide 5 completo (pipeline ventas + obra nueva + alquileres + totales agregados).
 - **Sprint 6** ✅: slide 6 completo (operaciones condicionadas + tarjeta de alerta con severidad y color condicional).
+- **Sprint 7** ✅: slide 11 completo (semáforo estratégico con asignación fija + 5 tokens nuevos + fix URL Drive→Slides para gráficos).
 
-Próximos pasos: extender calculator a slides 7-12, validar P-18 y P-20 con contabilidad, operacionalización (cuenta corporativa).
+Próximos pasos: extender calculator a slides 8, 9, 10, 12. Slide 7 pausado (pendiente fuente de datos). Validar P-18 y P-20 con contabilidad. Operacionalización (cuenta corporativa).
 
 ---
 
@@ -69,6 +70,21 @@ Próximos pasos: extender calculator a slides 7-12, validar P-18 y P-20 con cont
 - Tarjeta de alerta con etiqueta semántica `impacto_facturacion` ("Crítico" / "Alto" / "Estable") y color condicional del `volumen_riesgo` (rojo / amarillo / verde).
 - Función `_clasifica_impacto()` con rangos: `>80k Crítico`, `>30k Alto`, `<=30k Estable`.
 - Color override del importe `volumen_riesgo` aplicado dinámicamente desde el calculator (no color fijo de plantilla).
+
+### Slide 11 — Semáforo estratégico
+- Asignación FIJA de KPIs a columnas (no dinámica). Plantilla hardcodea qué KPI va en cada columna.
+- 5 tokens nuevos: `var_reservas_mom_observacion`, `var_contratos_mom_observacion`, `rentabilidad_op_signed`, `volumen_riesgo_short`, `mes_siguiente_capitalizado`.
+- Tokens `_observacion` con el mismo valor que sus equivalentes del slide 2 pero distinto nombre, para poder colorearlos en amarillo independientemente.
+- Helpers nuevos: `format_euro_compacto()` (135855 → "135,9 k €", soporta sufijos k/M) y `format_mes_capitalizado()`.
+- Calculator: `_mes_siguiente()` helper, simétrico a `_mes_anterior`.
+- Color override de `rentabilidad_op_signed`: verde si ≥ 20 % (objetivo), rojo si menor.
+- Color override de `volumen_riesgo_short`: hereda umbrales de `_clasifica_impacto()` del slide 6.
+- Color override de `var_*_mom_observacion`: amarillo siempre (semántica de la columna).
+
+### Fix técnico — URL de imagen para Slides API
+- Cambiado en `app/image_helpers.py`: el endpoint `drive.google.com/uc?id=X` ya no es fiable (a veces devuelve HTML de virus-scan en lugar de bytes de imagen).
+- Reemplazado por `drive.google.com/thumbnail?id=X&sz=w2000` que sirve bytes directos.
+- Afecta a la inserción del gráfico del slide 3 (volvió a funcionar tras el cambio).
 
 ### Documentación
 - `docs/MAPEO_DATOS.md`: tabla por slide con tokens, fuentes, fórmulas y estado.
@@ -321,15 +337,16 @@ Bajo coste de implementación, alto valor antes de exponer públicamente.
 
 Orden sugerido (cada uno desbloquea o aporta valor visible):
 
-1. **Extender calculator a slide 7** (cobros pendientes) — siguiente en orden visual.
-2. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
-3. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
+1. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
+2. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
+3. **Extender calculator a slide 12** (Hoja de ruta) — tokens derivados de slides ya cubiertos + constantes.
 4. **P-18 y P-20** — validar discrepancias con contabilidad (acción externa, en paralelo).
 5. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
 6. **P-12** — comando de validación de tokens (productividad, opcional).
 7. **Calculator slide 9** — comisiones con atrasos (complejo: multi-fuente).
-8. **P-01** — migración cuenta corporativa (cuando se confirme).
-9. **P-15** — workflow n8n con datos reales (depende del calculator completo).
-10. **P-17** — API Key antes de pasar a producción.
-11. **P-16** — despliegue al servidor.
-12. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).
+8. **Slide 7** — cobros pendientes, pausado hasta confirmar fuente de datos con contabilidad.
+9. **P-01** — migración cuenta corporativa (cuando se confirme).
+10. **P-15** — workflow n8n con datos reales (depende del calculator completo).
+11. **P-17** — API Key antes de pasar a producción.
+12. **P-16** — despliegue al servidor.
+13. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).

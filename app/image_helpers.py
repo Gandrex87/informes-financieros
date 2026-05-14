@@ -42,11 +42,18 @@ def replace_shape_with_image(
     """Sustituye los shapes que contienen el texto dado por la imagen.
 
     Usa replaceAllShapesWithImage de la Slides API. El parametro imageUrl
-    apunta a la URL publica del Drive file id.
+    apunta a un endpoint de Drive que sirve bytes de imagen directos.
+
+    Notas tecnicas:
+    - `drive.google.com/uc?id=X` ya NO es fiable: a veces devuelve HTML
+      ("¿estas seguro?") o pagina de virus-scan, lo que rompe Slides API.
+    - `drive.google.com/thumbnail?id=X&sz=w2000` SI funciona: sirve bytes de
+      imagen directos. El parametro sz=w2000 fuerza ancho de 2000 px (calidad
+      alta, evita la miniatura por defecto).
 
     Devuelve el numero de shapes reemplazados.
     """
-    image_url = f"https://drive.google.com/uc?id={image_file_id}"
+    image_url = f"https://drive.google.com/thumbnail?id={image_file_id}&sz=w2000"
     request = {
         "replaceAllShapesWithImage": {
             "imageUrl": image_url,

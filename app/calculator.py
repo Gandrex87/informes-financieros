@@ -95,10 +95,12 @@ from app.db import connection
 from app.formatter import (
     format_delta_ops_full,
     format_euro,
+    format_euro_compacto,
     format_int,
     format_int_signed,
     format_mes_anyo,
     format_mes_anyo_upper,
+    format_mes_capitalizado,
     format_mes_short_anyo,
     format_mes_short_upper_year,
     format_mes_year3_upper,
@@ -153,6 +155,12 @@ def _mes_anterior(anyo: int, mes: int) -> tuple[int, int]:
     if mes == 1:
         return anyo - 1, 12
     return anyo, mes - 1
+
+
+def _mes_siguiente(anyo: int, mes: int) -> tuple[int, int]:
+    if mes == 12:
+        return anyo + 1, 1
+    return anyo, mes + 1
 
 
 def _query_comercial(sede: str, anyo: int, mes: int) -> ComercialMes:
@@ -431,6 +439,7 @@ def build_payload_slide_2(
     """
     anyo_prev, mes_prev = _mes_anterior(anyo, mes)
     anyo_yoy, mes_yoy = anyo - 1, mes
+    anyo_next, mes_next = _mes_siguiente(anyo, mes)
 
     # --- Lecturas ---
     com_actual = _query_comercial(sede, anyo, mes)
@@ -600,6 +609,22 @@ def build_payload_slide_2(
         color_overrides["var_contratos_alquiler_mom"] = "verde" if var_contratos_alquiler_mom >= 0 else "rojo"
     # Slide 6: color del volumen_riesgo segun severidad
     color_overrides["volumen_riesgo"] = impacto_color
+    # Slide 11: mismos criterios que slide 6 para version compacta
+    color_overrides["volumen_riesgo_short"] = impacto_color
+    # Slide 11: rentabilidad operativa con signo, verde si supera el objetivo
+    # del 20% corporativo (umbral hardcoded en OBJETIVO_RENTABILIDAD).
+    if cont_actual.rentabilidad_operativa_pct is not None:
+        objetivo_pct = Decimal("0.20")
+        if cont_actual.rentabilidad_operativa_pct >= objetivo_pct:
+            color_overrides["rentabilidad_op_signed"] = "verde"
+        else:
+            color_overrides["rentabilidad_op_signed"] = "rojo"
+    # Slide 11: tokens "_observacion" siempre van en amarillo
+    # (columna semantica de atencion, no es señal verde/rojo).
+    if var_reservas_mom is not None:
+        color_overrides["var_reservas_mom_observacion"] = "amarillo"
+    if var_contratos_mom is not None:
+        color_overrides["var_contratos_mom_observacion"] = "amarillo"
 
     # --- Tramo de comision: por ahora hardcoded, vendra de parametros_sede_mes ---
     tramo_comision = "3 %"
@@ -703,6 +728,21 @@ def build_payload_slide_2(
         "volumen_riesgo": format_euro(volumen_riesgo),
         "n_ops_condicionadas": format_int(n_ops_condicionadas),
         "impacto_facturacion": impacto_etiqueta,
+
+        # --- Slide 11: Semáforo estratégico ---
+        # Asignacion de KPIs a columnas es fija (no dinamica).
+        # Tokens "_observacion" son el MISMO valor que var_*_mom pero con
+        # token distinto para poder colorearlos en amarillo (la columna
+        # "En observacion" del slide 11). Sin esto, compartirian color con
+        # las variaciones del slide 2 al buscar por texto.
+        "var_reservas_mom_observacion": format_pct_signed(var_reservas_mom, decimales=1),
+        "var_contratos_mom_observacion": format_pct_signed(var_contratos_mom, decimales=2),
+        "rentabilidad_op_signed": format_pct_signed(
+            cont_actual.rentabilidad_operativa_pct, decimales=2,
+        ),
+        "volumen_riesgo_short": format_euro_compacto(volumen_riesgo, decimales=1),
+        # Mes siguiente capitalizado para la narrativa "impacto en facturacion de X"
+        "mes_siguiente_capitalizado": format_mes_capitalizado(mes_next),
 
         # --- Slide 5: Pipeline Q2 ---
         # Trimestre del mes en curso (Q1, Q2, Q3, Q4)

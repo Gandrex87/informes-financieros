@@ -135,6 +135,13 @@ MESES_ES_SHORT = [
 ]
 
 
+def format_mes_capitalizado(mes: int) -> str:
+    """4 -> 'Abril'. Solo nombre del mes en castellano, capitalizado."""
+    if not 1 <= mes <= 12:
+        return ""
+    return MESES_ES[mes]
+
+
 def format_mes_anyo(anyo: int, mes: int) -> str:
     """4, 2026 -> 'Abril 2026'."""
     return f"{MESES_ES[mes]} {anyo}"
@@ -167,3 +174,34 @@ def format_trimestre(mes: int) -> str:
     if not 1 <= mes <= 12:
         return ""
     return f"Q{(mes - 1) // 3 + 1}"
+
+
+def format_euro_compacto(value: Number, decimales: int = 1) -> str:
+    """Formato compacto con sufijo k/M para slide 11 y similares.
+
+    Ejemplos:
+        547139    -> '547,1 k €'
+        135855    -> '135,9 k €'
+        2_300_000 -> '2,3 M €'
+        850       -> '850 €'    (sin sufijo si < 1000)
+    """
+    d = _to_decimal(value)
+    if d is None:
+        return ""
+    sign = "-" if d < 0 else ""
+    abs_d = abs(d)
+    if abs_d < 1000:
+        return f"{sign}{int(abs_d)} €"
+    if abs_d < 1_000_000:
+        compacto = abs_d / Decimal(1000)
+        return f"{sign}{_fmt_decimal(compacto, decimales)} k €"
+    compacto = abs_d / Decimal(1_000_000)
+    return f"{sign}{_fmt_decimal(compacto, decimales)} M €"
+
+
+def _fmt_decimal(value: Decimal, decimales: int) -> str:
+    """Formatea un Decimal con N decimales y coma como separador decimal."""
+    entero, _, dec = f"{value:.{decimales}f}".partition(".")
+    if decimales > 0:
+        return f"{entero},{dec}"
+    return entero
