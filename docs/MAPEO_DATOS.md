@@ -457,7 +457,68 @@ El mecanismo de colores busca shapes por texto del valor. Si `var_reservas_mom` 
 
 ---
 
-## Slides 7, 8, 9, 10, 12 — Pendientes de integrar
+## Slide 12 — Hoja de ruta del mes siguiente
+
+Cuatro tarjetas con objetivos para el mes/trimestre siguiente. La mayoría de
+tokens son **reutilizados** de slides anteriores (el calculator ya los emite).
+
+### Tokens del slide 12
+
+**Tarjeta 1 — Aceleración de cobros:**
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `total_pendiente_cobro` | constante provisional | `"204.392 €"` hardcoded en `TOTAL_PENDIENTE_COBRO_PROVISIONAL`. La fuente real está en slide 7, bloqueado por dependencia de datos externos. | ⏳ provisional |
+| `trimestre` | derivado | (ver slide 5) — usado en "Objetivo: Maximizar liquidez en Q2" | ✅ |
+
+**Tarjeta 2 — Blindaje de operaciones:**
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `volumen_riesgo` | VC | (heredado del slide 6) | ✅ |
+| `n_ops_condicionadas` | VC | (heredado del slide 6) | ✅ |
+
+**Tarjeta 3 — Conversión de pipeline:**
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `total_pipeline` | derivado | (heredado del slide 5) | ✅ |
+| `n_ops_pipeline` | derivado | (heredado del slide 5) | ✅ |
+
+**Tarjeta 4 — Control de inversión:**
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `objetivo_rentabilidad` | constante | `"20 %"` (heredado del slide 2) | ✅ |
+| `inversion_tecnologica` | constante provisional | `"27k€"` hardcoded en `INVERSION_TECNOLOGICA_PROVISIONAL`. **Pendiente confirmar con contabilidad** si es constante anual, acumulado, parámetro mensual u otra cosa. | ⏳ provisional |
+
+**Token global del slide:**
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `mes_siguiente_upper` | derivado | `format_mes_anyo_upper(anyo_next, mes_next)` — produce `"MAYO 2026"` (mes + año en mayúsculas) | ✅ |
+
+### Colores condicionales
+
+**Ninguno.** Las barras superiores de color de las 4 tarjetas (verde, rojo, amarillo, azul) son **decorativas fijas en la plantilla**. La tarjeta 4 siempre es azul, la 1 siempre verde, etc. — independiente de los valores. Si en el futuro contabilidad pidiera que cambiaran según evaluación cualitativa, sería un cambio nuevo.
+
+### Constantes provisionales agrupadas
+
+Al principio de `calculator.py` están agrupadas las constantes pendientes de
+mover a su fuente real:
+
+```python
+OBJETIVO_RENTABILIDAD = "20 %"  # corporativo, no varía a corto plazo
+INVERSION_TECNOLOGICA_PROVISIONAL = "27k€"  # pendiente contabilidad
+TOTAL_PENDIENTE_COBRO_PROVISIONAL = "204.392 €"  # pendiente fuente slide 7
+```
+
+Buscar `PROVISIONAL` en el código localiza los puntos a actualizar cuando se
+confirme la fuente real.
+
+---
+
+## Slides 7, 8, 9, 10 — Pendientes de integrar
 
 Listado resumido. Cada uno tendrá su sección detallada cuando se ataque.
 
@@ -467,7 +528,6 @@ Listado resumido. Cada uno tendrá su sección detallada cuando se ataque.
 | 8 | Break Even abril | CM (break_even, ingresos_margen_*, ebitda) + narrativa | Narrativa templating determinista (P-07) |
 | 9 | Comisiones directores | VC (cobradas mes) + CM (% comisión) + tabla atrasos | Multi-fuente, tabla `n_max=10` |
 | 10 | Break Even mayo (proyección) | CM mes+1 (proyectados) | Mismo patrón que slide 8 sin narrativa |
-| 12 | Hoja de ruta | tokens derivados de slides 5, 6, 7 + constantes | Mayoría agregados |
 
 ---
 

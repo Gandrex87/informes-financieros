@@ -114,6 +114,11 @@ logger = logging.getLogger(__name__)
 
 OBJETIVO_RENTABILIDAD = "20 %"  # constante corporativa
 
+# Slide 12 - constantes provisionales pendientes de confirmar con contabilidad
+# y/o de fuentes externas no integradas todavia.
+INVERSION_TECNOLOGICA_PROVISIONAL = "27k€"  # pendiente origen (¿constante anual? ¿acumulado?)
+TOTAL_PENDIENTE_COBRO_PROVISIONAL = "204.392 €"  # slide 7 bloqueado, sin fuente confirmada
+
 
 @dataclass
 class ComercialMes:
@@ -743,6 +748,15 @@ def build_payload_slide_2(
         "volumen_riesgo_short": format_euro_compacto(volumen_riesgo, decimales=1),
         # Mes siguiente capitalizado para la narrativa "impacto en facturacion de X"
         "mes_siguiente_capitalizado": format_mes_capitalizado(mes_next),
+
+        # --- Slide 12: Hoja de ruta del mes siguiente ---
+        # La mayoria de tokens del slide 12 ya estan emitidos por slides
+        # anteriores (volumen_riesgo, n_ops_condicionadas, total_pipeline,
+        # n_ops_pipeline, objetivo_rentabilidad). Aqui solo añadimos los
+        # especificos del slide.
+        "mes_siguiente_upper": format_mes_anyo_upper(anyo_next, mes_next),
+        "inversion_tecnologica": INVERSION_TECNOLOGICA_PROVISIONAL,
+        "total_pendiente_cobro": TOTAL_PENDIENTE_COBRO_PROVISIONAL,
 
         # --- Slide 5: Pipeline Q2 ---
         # Trimestre del mes en curso (Q1, Q2, Q3, Q4)

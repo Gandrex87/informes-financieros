@@ -8,8 +8,9 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 - **Sprint 5** ✅: slide 5 completo (pipeline ventas + obra nueva + alquileres + totales agregados).
 - **Sprint 6** ✅: slide 6 completo (operaciones condicionadas + tarjeta de alerta con severidad y color condicional).
 - **Sprint 7** ✅: slide 11 completo (semáforo estratégico con asignación fija + 5 tokens nuevos + fix URL Drive→Slides para gráficos).
+- **Sprint 8** ✅: slide 12 completo (hoja de ruta con tokens reutilizados + 2 constantes provisionales pendientes).
 
-Próximos pasos: extender calculator a slides 8, 9, 10, 12. Slide 7 pausado (pendiente fuente de datos). Validar P-18 y P-20 con contabilidad. Operacionalización (cuenta corporativa).
+Próximos pasos: extender calculator a slides 8, 9, 10. Slide 7 pausado (pendiente fuente de datos). Validar P-18, P-20 y constantes provisionales con contabilidad. Operacionalización (cuenta corporativa).
 
 ---
 
@@ -86,6 +87,13 @@ Próximos pasos: extender calculator a slides 8, 9, 10, 12. Slide 7 pausado (pen
 - Reemplazado por `drive.google.com/thumbnail?id=X&sz=w2000` que sirve bytes directos.
 - Afecta a la inserción del gráfico del slide 3 (volvió a funcionar tras el cambio).
 
+### Slide 12 — Hoja de ruta
+- La mayoría de tokens son **reutilizados** de slides anteriores (volumen_riesgo, n_ops_condicionadas, total_pipeline, n_ops_pipeline, objetivo_rentabilidad, trimestre).
+- 1 token nuevo derivado: `mes_siguiente_upper` (formato `"MAYO 2026"`).
+- 2 constantes provisionales agrupadas en cabecera del calculator: `INVERSION_TECNOLOGICA_PROVISIONAL = "27k€"` y `TOTAL_PENDIENTE_COBRO_PROVISIONAL = "204.392 €"`. Pendiente confirmar fuente real con contabilidad.
+- Texto "Objetivo: Maximizar liquidez en Q2" → reemplazado en plantilla por `{{trimestre}}` para que se ajuste al trimestre del mes que se genera.
+- Barras superiores de color son fijas en plantilla (decorativas, no condicionales).
+
 ### Documentación
 - `docs/MAPEO_DATOS.md`: tabla por slide con tokens, fuentes, fórmulas y estado.
 - `PENDIENTES.md` (este documento).
@@ -94,6 +102,16 @@ Próximos pasos: extender calculator a slides 8, 9, 10, 12. Slide 7 pausado (pen
 ---
 
 ## 🟡 Discrepancias en observación — verificar con contabilidad
+
+### P-21 · Origen de `inversion_tecnologica` (slide 12)
+
+Hoy hardcoded como `"27k€"` (`INVERSION_TECNOLOGICA_PROVISIONAL`) en `calculator.py`. Hipótesis posibles:
+
+- **A.** Constante anual: cifra acumulada del año en inversión tecnológica/CRM.
+- **B.** Suma acumulada de `gastos_programadores` desde enero hasta el mes generado.
+- **C.** Parámetro mensual definido por dirección (futuro `parametros_sede_mes`).
+
+**Acción:** preguntar a contabilidad de dónde sale el `27k€` del PDF de abril 2026 y qué semántica tiene. Según respuesta, ajustar `calculator.py`.
 
 ### P-20 · Diferencia importe obra nueva "Altos de Santa Bárbara"
 
@@ -339,14 +357,13 @@ Orden sugerido (cada uno desbloquea o aporta valor visible):
 
 1. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
 2. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
-3. **Extender calculator a slide 12** (Hoja de ruta) — tokens derivados de slides ya cubiertos + constantes.
-4. **P-18 y P-20** — validar discrepancias con contabilidad (acción externa, en paralelo).
-5. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
-6. **P-12** — comando de validación de tokens (productividad, opcional).
-7. **Calculator slide 9** — comisiones con atrasos (complejo: multi-fuente).
-8. **Slide 7** — cobros pendientes, pausado hasta confirmar fuente de datos con contabilidad.
-9. **P-01** — migración cuenta corporativa (cuando se confirme).
-10. **P-15** — workflow n8n con datos reales (depende del calculator completo).
-11. **P-17** — API Key antes de pasar a producción.
-12. **P-16** — despliegue al servidor.
-13. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).
+3. **P-18, P-20, P-21** — validar discrepancias y constantes provisionales con contabilidad (acción externa, en paralelo).
+4. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
+5. **P-12** — comando de validación de tokens (productividad, opcional).
+6. **Calculator slide 9** — comisiones con atrasos (complejo: multi-fuente).
+7. **Slide 7** — cobros pendientes, pausado hasta confirmar fuente de datos con contabilidad.
+8. **P-01** — migración cuenta corporativa (cuando se confirme).
+9. **P-15** — workflow n8n con datos reales (depende del calculator completo).
+10. **P-17** — API Key antes de pasar a producción.
+11. **P-16** — despliegue al servidor.
+12. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).
