@@ -93,14 +93,18 @@ from typing import Any
 
 from app.db import connection
 from app.formatter import (
+    format_delta_ops_full,
     format_euro,
     format_int,
     format_int_signed,
     format_mes_anyo,
     format_mes_anyo_upper,
     format_mes_short_anyo,
+    format_mes_short_upper_year,
+    format_mes_year3_upper,
     format_pct,
     format_pct_signed,
+    format_pct_with_arrow,
 )
 
 logger = logging.getLogger(__name__)
@@ -263,6 +267,20 @@ def build_payload_slide_2(
     arras_mes_anterior = com_prev.arras_total
     arras_anyo_anterior = cont_yoy.arras_firmadas if cont_yoy else None
 
+    # --- Calculos especificos del slide 3 ---
+    # Variaciones YoY (comparativa interanual)
+    var_reservas_yoy = _variacion(com_actual.señales_total, señales_anyo_anterior)
+    var_contratos_yoy = _variacion(com_actual.arras_total, arras_anyo_anterior)
+
+    # Ticket medio = contratos_firmados / n_ops_contratos
+    ticket_medio = None
+    if com_actual.arras_n_ops > 0 and com_actual.arras_total is not None:
+        ticket_medio = com_actual.arras_total / com_actual.arras_n_ops
+    ticket_medio_prev = None
+    if com_prev.arras_n_ops > 0 and com_prev.arras_total is not None:
+        ticket_medio_prev = com_prev.arras_total / com_prev.arras_n_ops
+    var_ticket_medio_mom = _variacion(ticket_medio, ticket_medio_prev)
+
     # --- Color overrides ---
     color_overrides = {}
     if var_reservas_mom is not None:
@@ -273,6 +291,17 @@ def build_payload_slide_2(
         color_overrides["var_ingresos_mom"] = "verde" if var_ingresos_mom >= 0 else "rojo"
     if var_rentab_mom is not None:
         color_overrides["var_rentab_mom"] = "verde" if var_rentab_mom >= 0 else "rojo"
+    # Slide 3
+    if var_reservas_mom is not None:
+        color_overrides["var_reservas_mom_arrow"] = "verde" if var_reservas_mom >= 0 else "rojo"
+    if var_contratos_mom is not None:
+        color_overrides["var_contratos_mom_arrow"] = "verde" if var_contratos_mom >= 0 else "rojo"
+    if var_reservas_yoy is not None:
+        color_overrides["var_reservas_yoy"] = "verde" if var_reservas_yoy >= 0 else "rojo"
+    if var_contratos_yoy is not None:
+        color_overrides["var_contratos_yoy"] = "verde" if var_contratos_yoy >= 0 else "rojo"
+    if var_ticket_medio_mom is not None:
+        color_overrides["var_ticket_medio_mom"] = "verde" if var_ticket_medio_mom >= 0 else "rojo"
 
     # --- Tramo de comision: por ahora hardcoded, vendra de parametros_sede_mes ---
     tramo_comision = "3 %"
@@ -320,4 +349,34 @@ def build_payload_slide_2(
         "var_rentab_mom": format_pct_signed(var_rentab_mom, decimales=2),
         "resultado_op": format_euro(cont_actual.ebitda_no_extras),
         "objetivo_rentabilidad": OBJETIVO_RENTABILIDAD,
+
+        # --- Slide 3: Produccion comercial ---
+        # Formatos de mes usados en el slide
+        "mes_anterior_upper": format_mes_year3_upper(anyo_prev, mes_prev),
+        "mes_año_upper_short": format_mes_year3_upper(anyo, mes),
+        "mes_año_anterior_upper": format_mes_anyo_upper(anyo_yoy, mes_yoy),
+        "mes_año_anterior_short_upper": format_mes_short_upper_year(anyo_yoy, mes_yoy),
+
+        # Tarjeta Pagas y señales (Mar26 vs Abr26)
+        "n_ops_reservas_mes_anterior": format_int(com_prev.señales_n_ops),
+        "var_reservas_mom_arrow": format_pct_with_arrow(var_reservas_mom, decimales=1),
+        "delta_ops_reservas_full": format_delta_ops_full(
+            com_actual.señales_n_ops, com_prev.señales_n_ops
+        ),
+
+        # Tarjeta Arras y contratos (Mar26 vs Abr26)
+        "n_ops_contratos_mes_anterior": format_int(com_prev.arras_n_ops),
+        "var_contratos_mom_arrow": format_pct_with_arrow(var_contratos_mom, decimales=1),
+        "delta_ops_contratos_full": format_delta_ops_full(
+            com_actual.arras_n_ops, com_prev.arras_n_ops
+        ),
+
+        # Tarjeta Comparativa interanual (vs ABRIL 2025)
+        "var_reservas_yoy": format_pct_signed(var_reservas_yoy, decimales=0),
+        "var_contratos_yoy": format_pct_signed(var_contratos_yoy, decimales=0),
+
+        # Tarjeta Ticket medio
+        "ticket_medio": format_euro(ticket_medio),
+        "ticket_medio_mes_anterior": format_euro(ticket_medio_prev),
+        "var_ticket_medio_mom": format_pct_signed(var_ticket_medio_mom, decimales=1),
     }

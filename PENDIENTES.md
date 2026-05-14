@@ -1,23 +1,46 @@
 # Pendientes — Próximas iteraciones
 
-Estado a **2026-05-12** tras cerrar dos sprints:
+Estado a **2026-05-14** tras cerrar varios hitos:
 - **Sprint 1** ✅: tokenización completa de los 12 slides + pipeline funcional con datos mock locales.
 - **Sprint 2** ✅: servicio FastAPI + dockerización + integración con n8n local. Validado end-to-end: n8n llama al servicio en red Docker compartida y recibe el PDF.
+- **Sprint 3** ✅: colores condicionales (P-04) + integración Postgres real para slides 1, 2 y 3 (lado izquierdo).
+- **Sprint 4 (en curso)**: documentación de fuentes de datos (`docs/MAPEO_DATOS.md`). Próximo: gráfico del slide 3 (P-05).
 
-Próximos sprints deberían enfocarse en (a) sustituir el mock por datos reales, (b) decisiones que mejoren fidelidad visual (colores condicionales, gráfico), (c) operacionalización (cuenta corporativa, observabilidad).
+Próximos pasos: (a) cerrar el slide 3 con el gráfico (P-05), (b) extender calculator a slides 4-12, (c) operacionalización (cuenta corporativa, observabilidad).
 
 ---
 
 ## ✅ Hecho
 
+### Plataforma técnica
 - Pipeline Slides → PDF funcional (OAuth de usuario, Drive API export).
 - 12 slides tokenizados con ~120 tokens + 6 listas variables (`pipeline_alquiler`, `comisiones_atrasos`, `operaciones_condicionadas`, `cobros_pendientes`, `ventas_pendientes`, `obras_nuevas`).
 - Helper `slots()` + `expand_lists()` para manejar listas de longitud variable.
-- Servicio FastAPI con endpoints `GET /health` + `POST /generar-informe`.
+- Servicio FastAPI con endpoints `GET /health`, `POST /generar-informe` (payload completo) y `POST /generar-desde-db` (lee Postgres internamente).
 - Dockerfile + docker-compose con healthcheck y volumen de credenciales.
 - Conexión a la red de n8n (`sesion-idealista_default`) para que llame al servicio por nombre de contenedor (`http://informes-financieros-api:8000`).
-- Workflow n8n probado: Manual Trigger → Code (payload completo) → HTTP Request → PDF binario recibido.
+- Workflow n8n probado tanto con payload completo como con `/generar-desde-db` ({sede, anyo, mes}).
 - Datos mock realistas (`data/mock_abril_2026.json`) con el contenido completo del informe abril 2026.
+
+### Colores condicionales (P-04 — cerrado)
+- Paleta corporativa en `app/colors.py`.
+- Helpers `find_text_locations()` + `apply_color_overrides()` en `app/color_helpers.py`.
+- Soporte para shapes sueltos y celdas de tablas nativas (`cellLocation`).
+- Convención declarativa: el cliente envía `_color_overrides` en el payload; el servicio aplica sin interpretar valores.
+- Aplicado en slides 2, 3, 4, 8, 11.
+
+### Integración Postgres (slides 1, 2 y 3 lado izquierdo)
+- Schema `informes_financieros.contabilidad_mensual` con PK `(sede, escenario, anyo, mes)`.
+- Workflow n8n carga el cuadro contable del Sheet (rango `B62:V107`) con upsert `ON CONFLICT`.
+- Calculator (`app/calculator.py`) lee de `ventas_comerciales` + `contabilidad_mensual` y compone el payload.
+- Formatter (`app/formatter.py`) con locale es_ES manual (sin dependencia del SO): euros, porcentajes, deltas, flechas `▲`/`▼` automáticas, meses.
+- Color overrides emitidos automáticamente por el calculator según signo de cada variación.
+- Discrepancias documentadas en P-18.
+
+### Documentación
+- `docs/MAPEO_DATOS.md`: tabla por slide con tokens, fuentes, fórmulas y estado.
+- `PENDIENTES.md` (este documento).
+- Memoria del proyecto en `~/.claude/projects/.../memory/` con decisiones arquitectónicas.
 
 ---
 
@@ -103,28 +126,7 @@ Esperando referencias a las hojas con:
 
 ## 🚧 Funcionalidad pendiente
 
-### P-04 · Colores condicionales (verde/rojo según estado)
-**Estado:** explorado, no implementado. Hoy todos los textos heredan el color del token en la plantilla, sin lógica condicional.
-
-**Casos detectados:**
-- Slide 2: variaciones MoM en rojo si negativas, verde si positivas.
-- Slide 3: flechas `▲ +33,7 %` (verde) vs `▼ -6,6 %` (rojo).
-- Slide 8: estados `✓ SUPERADO` (verde) vs `FALTAN: X €` (rojo).
-- Slide 11: clasificación de KPIs en columnas Fortaleza/Observación/Riesgo.
-
-**Camino acordado:**
-1. Helper `apply_color_overrides()` en `app/token_helpers.py`.
-2. Convención en el JSON: lista `_color_overrides` con `{token: color}`.
-3. Paleta de colores corporativos definida en Python.
-4. Después de `replaceAllText`, aplicar `updateTextStyle` por cada token con override.
-
-**Colores fijos no condicionales** (ej. dorado de "Facturación cobrada" en slide 8) se aplican en la plantilla, no necesitan código.
-
-**Prioridad sugerida:** alta — mejora visual significativa con coste moderado de implementación.
-
----
-
-### P-05 · Gráfico del slide 3 (Reservas vs Arras)
+### P-05 · Gráfico del slide 3 (Reservas vs Arras) — SIGUIENTE
 **Estado:** no iniciado. Hoy el gráfico está hardcodeado en la plantilla.
 
 Gráfico de barras: 3 períodos (Abr'25, Mar'26, Abr'26) × 2 series (Reservas, Contratos Firmados).
@@ -268,14 +270,16 @@ Bajo coste de implementación, alto valor antes de exponer públicamente.
 
 Orden sugerido (cada uno desbloquea o aporta valor visible):
 
-1. **P-11** — pedir/recibir datos reales de contabilidad (acción externa, no depende de código).
-2. **P-04** — colores condicionales: mejora visual grande, código moderado.
-3. **P-12** — comando de validación de tokens: pequeña inversión, evita errores futuros.
-4. **P-05** — gráfico del slide 3 con matplotlib.
-5. **P-01** — migración cuenta corporativa (cuando se confirme).
-6. **P-08** — Postgres + calculator + formatter (cuando lleguen datos reales).
-7. **P-07** — narrativa determinista (depende de P-08).
-8. **P-15** — workflow n8n con datos reales (depende de P-11 y P-08).
-9. **P-17** — API Key antes de pasar a producción.
-10. **P-16** — despliegue al servidor (al final, cuando todo lo previo esté validado).
-11. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).
+1. **P-05** — gráfico del slide 3 con matplotlib (siguiente paso natural — cierra slide 3).
+2. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
+3. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
+4. **Extender calculator a slide 4** (gestión alquileres) — VC filtrando alquileres.
+5. **P-18** — validar discrepancias con contabilidad (acción externa, en paralelo).
+6. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
+7. **P-12** — comando de validación de tokens (productividad, opcional).
+8. **Calculator slides 5, 6, 7, 9** — los más complejos (listas variables con queries por estado/condición).
+9. **P-01** — migración cuenta corporativa (cuando se confirme).
+10. **P-15** — workflow n8n con datos reales (depende del calculator completo).
+11. **P-17** — API Key antes de pasar a producción.
+12. **P-16** — despliegue al servidor.
+13. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).

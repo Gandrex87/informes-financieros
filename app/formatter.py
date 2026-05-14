@@ -76,6 +76,38 @@ def format_int(value: Number) -> str:
     return str(int(d))
 
 
+def format_pct_with_arrow(value: Number, decimales: int = 1) -> str:
+    """Convierte una variacion decimal a '▲ +33,7 %' o '▼ -6,6 %'.
+
+    Recibe el valor como decimal (0.337 = 33,7%). Flecha ▲ si positivo o
+    cero, ▼ si negativo. Signo siempre presente. Si value es None, "".
+    """
+    d = _to_decimal(value)
+    if d is None:
+        return ""
+    arrow = "▲" if d >= 0 else "▼"
+    return f"{arrow} {format_pct_signed(d, decimales)}"
+
+
+def format_delta_ops_full(actual: Number, anterior: Number, suffix: str = "ops") -> str:
+    """Convierte (actual, anterior) -> '-18 ops (-30 %)' o '+3 ops (+8 %)'.
+
+    Calcula la diferencia absoluta + la variacion porcentual y las junta.
+    Si anterior es None o 0, omite la parte porcentual.
+    """
+    a = _to_decimal(actual)
+    p = _to_decimal(anterior)
+    if a is None or p is None:
+        return ""
+    diff = int(a - p)
+    body_abs = f"{diff:+d} {suffix}"
+    if p == 0:
+        return body_abs
+    pct = (a - p) / p
+    pct_str = format_pct_signed(pct, decimales=0)
+    return f"{body_abs} ({pct_str})"
+
+
 # ---------- Internos ----------
 
 def _fmt_pct(d: Decimal, decimales: int) -> str:

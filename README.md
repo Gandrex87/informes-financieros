@@ -50,3 +50,7 @@ informes_financieros/
 ├── .env.example          # Plantilla de variables
 └── requirements.txt
 ```
+
+docker compose build
+
+docker compose up -d
