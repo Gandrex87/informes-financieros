@@ -105,6 +105,7 @@ from app.formatter import (
     format_pct,
     format_pct_signed,
     format_pct_with_arrow,
+    format_trimestre,
 )
 
 logger = logging.getLogger(__name__)
@@ -234,6 +235,84 @@ def _query_alquileres_mes(anyo: int, mes: int) -> AlquilerMes:
     )
 
 
+def _query_pipeline_ventas() -> list[dict]:
+    """Lista de ventas pendientes de firma (slide 5).
+
+    Filtro:
+    - Es venta (no alquiler): inmueble NOT LIKE 'ALQ.-%'.
+    - Pendiente: arras_firmadas = 'NO'.
+    - Excluimos las 2 promociones de obra nueva conocidas (van a su seccion aparte).
+
+    NO excluimos todo 'urb.%' porque hay ventas normales con ese prefijo
+    (ej. 'Urb. Loma de Caballeros 3'). Solo excluimos las promociones
+    de obra nueva explicitas.
+
+    DISTINCT defensivo por (inmueble, fecha_senal, honorarios_totales) para
+    neutralizar duplicados puntuales detectados en P-19.
+
+    Ordenado por honorarios descendente.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    sql = f"""
+        SELECT DISTINCT ON (inmueble, fecha_senal, honorarios_totales)
+            inmueble, honorarios_totales
+        FROM {schema}.ventas_comerciales
+        WHERE inmueble NOT LIKE 'ALQ.-%%'
+          AND arras_firmadas = 'NO'
+          AND inmueble NOT ILIKE '%%victoria kent%%'
+          AND inmueble NOT ILIKE 'urb.%%santa%%b_rbara%%'
+        ORDER BY inmueble, fecha_senal, honorarios_totales, honorarios_totales DESC NULLS LAST;
+    """
+    with connection() as conn:
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+    items = [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
+    # DISTINCT ON requiere ORDER BY que empieza por las claves; reordenamos
+    # despues por importe para presentacion.
+    items.sort(key=lambda r: r["honorarios"] or 0, reverse=True)
+    return items
+
+
+def _query_obra_nueva() -> list[dict]:
+    """Operaciones de obra nueva agrupadas por promocion (slide 5).
+
+    Detecta dos promociones conocidas:
+    - 'C. VICTORIA KENT'
+    - 'Urb. Altos de Santa Bárbara'
+
+    Filtro: cualquier estado EXCEPTO 'CAÍDA - 0' (operacion caida).
+    Las obras nuevas no se rigen por arras_firmadas='SI' como las ventas
+    normales — incluimos todas las que esten "vivas".
+
+    Devuelve una fila por promocion con nombre y total de honorarios.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    # Filtro defensivo: solo las promociones explicitamente conocidas.
+    # Si aparece una nueva, hay que añadirla aqui (o migrar a una tabla
+    # promociones_obra_nueva). Ver discusion en docs/MAPEO_DATOS.md.
+    sql = f"""
+        SELECT
+            CASE
+                WHEN inmueble ILIKE '%%victoria kent%%' THEN 'C. VICTORIA KENT'
+                WHEN inmueble ILIKE 'urb.%%santa%%b_rbara%%' THEN 'Urb. Altos de Santa Bárbara'
+            END AS promocion,
+            COALESCE(SUM(honorarios_totales), 0) AS total_honorarios
+        FROM {schema}.ventas_comerciales
+        WHERE (arras_firmadas IS DISTINCT FROM 'CAÍDA - 0')
+          AND (
+              inmueble ILIKE '%%victoria kent%%'
+              OR inmueble ILIKE 'urb.%%santa%%b_rbara%%'
+          )
+        GROUP BY promocion
+        HAVING COALESCE(SUM(honorarios_totales), 0) > 0
+        ORDER BY total_honorarios DESC;
+    """
+    with connection() as conn:
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+    return [{"nombre": r["promocion"], "honorarios": r["total_honorarios"]} for r in rows]
+
+
 def _query_pipeline_alquileres() -> list[dict]:
     """Lista de alquileres con señal pero sin contrato firmado todavia.
 
@@ -323,6 +402,10 @@ def build_payload_slide_2(
     alq_prev = _query_alquileres_mes(anyo_prev, mes_prev)
     pipeline_alq_rows = _query_pipeline_alquileres()
 
+    # Slide 5: pipeline Q2 (ventas + obra nueva)
+    pipeline_ventas_rows = _query_pipeline_ventas()
+    obra_nueva_rows = _query_obra_nueva()
+
     if cont_actual is None:
         raise ValueError(
             f"No hay datos contables para sede={sede} escenario={escenario} "
@@ -395,6 +478,33 @@ def build_payload_slide_2(
         (row["honorarios"] or 0) for row in pipeline_alq_rows
     )
     n_ops_pipeline_alquiler = len(pipeline_alq_rows)
+
+    # --- Calculos especificos del slide 5 ---
+    # Pipeline ventas: lista para slots venta_pend_*.
+    ventas_pendientes = [
+        {"nombre": row["inmueble"], "importe": format_euro(row["honorarios"])}
+        for row in pipeline_ventas_rows
+    ]
+    total_ventas_pipeline = sum(
+        (row["honorarios"] or 0) for row in pipeline_ventas_rows
+    )
+
+    # Obra nueva: lista para slots obra_nueva_*.
+    obras_nuevas = [
+        {"nombre": row["nombre"], "importe": format_euro(row["honorarios"])}
+        for row in obra_nueva_rows
+    ]
+    total_obra_nueva = sum(
+        (row["honorarios"] or 0) for row in obra_nueva_rows
+    )
+
+    # Total agregado del pipeline (ventas + obra nueva + alquileres)
+    total_pipeline = total_ventas_pipeline + total_obra_nueva + total_pipeline_alquiler
+    n_ops_pipeline = (
+        len(pipeline_ventas_rows)
+        + len(obra_nueva_rows)
+        + n_ops_pipeline_alquiler
+    )
 
     # Ticket medio = contratos_firmados / n_ops_contratos
     ticket_medio = None
@@ -528,6 +638,19 @@ def build_payload_slide_2(
         "total_pipeline_alquiler": format_euro(total_pipeline_alquiler),
         "n_ops_pipeline_alquiler": format_int(n_ops_pipeline_alquiler),
         "nota_pipeline_alquiler": "",  # vacia por ahora (decision tomada)
+
+        # --- Slide 5: Pipeline Q2 ---
+        # Trimestre del mes en curso (Q1, Q2, Q3, Q4)
+        "trimestre": format_trimestre(mes),
+        # Lista ventas pendientes (expand_lists -> slots venta_pend_N_*)
+        "ventas_pendientes": ventas_pendientes,
+        # Lista obra nueva (expand_lists -> slots obra_nueva_N_*)
+        "obras_nuevas": obras_nuevas,
+        # Totales agregados a la derecha
+        "total_ventas_pipeline": format_euro(total_ventas_pipeline),
+        "total_obra_nueva": format_euro(total_obra_nueva),
+        "total_pipeline": format_euro(total_pipeline),
+        "n_ops_pipeline": format_int(n_ops_pipeline),
     }
 
 

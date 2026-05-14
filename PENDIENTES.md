@@ -5,8 +5,9 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 - **Sprint 2** ✅: servicio FastAPI + dockerización + integración con n8n local. Validado end-to-end: n8n llama al servicio en red Docker compartida y recibe el PDF.
 - **Sprint 3** ✅: colores condicionales (P-04) + integración Postgres real para slides 1, 2 y 3 (lado izquierdo).
 - **Sprint 4** ✅: documentación (`docs/MAPEO_DATOS.md`) + gráfico del slide 3 (P-05) + slide 4 completo (KPIs + pipeline pendiente).
+- **Sprint 5** ✅: slide 5 completo (pipeline ventas + obra nueva + alquileres + totales agregados).
 
-Próximos pasos: extender calculator a slides 5-12, validar P-18 con contabilidad, operacionalización (cuenta corporativa).
+Próximos pasos: extender calculator a slides 6-12, validar P-18 y P-20 con contabilidad, operacionalización (cuenta corporativa).
 
 ---
 
@@ -51,6 +52,15 @@ Próximos pasos: extender calculator a slides 5-12, validar P-18 con contabilida
 - Helper `_limpia_inmueble_alq()` para quitar el prefijo `ALQ.-` del nombre.
 - 2 nuevos color overrides condicionales (`var_reservas_alquiler_mom`, `var_contratos_alquiler_mom`).
 
+### Slide 5 — Pipeline Q2 (ventas + obra nueva + alquileres)
+- 3 sub-secciones: pipeline de ventas (3 columnas, `n_max=15`), obra nueva (2 promociones agrupadas, `n_max=4`), alquileres (reusa `pipeline_alquiler` del slide 4).
+- Queries nuevas en calculator: `_query_pipeline_ventas()`, `_query_obra_nueva()`.
+- Pipeline ventas: excluye obra nueva conocida (`%victoria kent%` y `urb.%santa%b_rbara%`) pero NO `urb.%` genérico (hay ventas normales con ese prefijo, ej. `Urb. Loma de Caballeros 3`).
+- Obra nueva: filtra por `arras_firmadas IS DISTINCT FROM 'CAÍDA - 0'` (incluye NULL y todos los estados activos). Agrupa con `CASE WHEN` por promoción.
+- DISTINCT defensivo contra P-19 en pipeline ventas.
+- Totales agregados: `total_ventas_pipeline`, `total_obra_nueva`, `total_pipeline` (suma de los tres), `n_ops_pipeline`.
+- Discrepancia P-20 documentada (Altos de Santa Bárbara da 587k vs 505k del PDF).
+
 ### Documentación
 - `docs/MAPEO_DATOS.md`: tabla por slide con tokens, fuentes, fórmulas y estado.
 - `PENDIENTES.md` (este documento).
@@ -59,6 +69,42 @@ Próximos pasos: extender calculator a slides 5-12, validar P-18 con contabilida
 ---
 
 ## 🟡 Discrepancias en observación — verificar con contabilidad
+
+### P-20 · Diferencia importe obra nueva "Altos de Santa Bárbara"
+
+Calculator devuelve **587.450 €** para la promoción `Urb. Altos de Santa Bárbara` en slide 5 (21 operaciones agregadas). El PDF original de abril 2026 mostraba **505.850 €**. Diferencia ~82k €.
+
+La promoción `C. VICTORIA KENT` cuadra exactamente (94.240 €).
+
+**Datos en BD confirmados correctos** según validación con el cliente.
+
+**Hipótesis:**
+- El PDF original podría haber filtrado por un subconjunto (ej. solo las firmadas en el mes en curso, solo las cobradas, etc.) que aún no contemplamos en el calculator.
+- O el cuadro manual original tenía operaciones desactualizadas.
+
+**Acción:** preguntar a contabilidad qué criterio aplica para el "total acumulado" de cada promoción de obra nueva en el slide 5. Cuando se aclare, ajustar el filtro en `_query_obra_nueva()`.
+
+---
+
+### P-19 · Duplicados aislados en `ventas_comerciales`
+
+Detectados 2 inmuebles con filas duplicadas idénticas (mismo `fecha_senal`, `honorarios_totales`, asesor; solo difieren en `id` y `created_at`):
+
+- `C. Nicolas David 13` (fecha_senal 2026-05-08, 11.700 €) — duplicado.
+- `C. Poeta Mas y Ros 72` (fecha_senal 2026-05-08, 9.157,23 €) — duplicado.
+
+**Hipótesis:** re-ejecución puntual de la ingesta sin `ON CONFLICT` que evite duplicados.
+
+**Mitigación aplicada (parche temporal):** las queries de pipeline en `calculator.py` para slide 5 usan `DISTINCT ON` o `GROUP BY` para no contar duplicados.
+
+**Acciones recomendadas a futuro:**
+1. Borrar manualmente las 2 filas duplicadas (`id` mayor).
+2. Añadir `UNIQUE (inmueble, fecha_senal, honorarios_totales)` o similar como constraint.
+3. Modificar la ingesta n8n para usar `ON CONFLICT DO UPDATE` (igual que hicimos en `contabilidad_mensual`).
+
+**No bloqueante:** afecta solo a este conteo de pipeline; el calculator lo neutraliza vía DISTINCT.
+
+---
 
 ### P-18 · Diferencias calculator vs PDF de abril 2026
 
@@ -266,14 +312,15 @@ Bajo coste de implementación, alto valor antes de exponer públicamente.
 
 Orden sugerido (cada uno desbloquea o aporta valor visible):
 
-1. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
-2. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
-3. **P-18** — validar discrepancias con contabilidad (acción externa, en paralelo).
-4. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
-5. **P-12** — comando de validación de tokens (productividad, opcional).
-6. **Calculator slides 5, 6, 7, 9** — los más complejos (listas variables con queries por estado/condición).
-7. **P-01** — migración cuenta corporativa (cuando se confirme).
-8. **P-15** — workflow n8n con datos reales (depende del calculator completo).
-9. **P-17** — API Key antes de pasar a producción.
-10. **P-16** — despliegue al servidor.
-11. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).
+1. **Extender calculator a slide 6** (operaciones condicionadas) — siguiente en orden visual.
+2. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
+3. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
+4. **P-18 y P-20** — validar discrepancias con contabilidad (acción externa, en paralelo).
+5. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
+6. **P-12** — comando de validación de tokens (productividad, opcional).
+7. **Calculator slides 7, 9** — los más complejos (cobros pendientes, comisiones con atrasos).
+8. **P-01** — migración cuenta corporativa (cuando se confirme).
+9. **P-15** — workflow n8n con datos reales (depende del calculator completo).
+10. **P-17** — API Key antes de pasar a producción.
+11. **P-16** — despliegue al servidor.
+12. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).

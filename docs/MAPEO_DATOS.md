@@ -248,13 +248,128 @@ La lista se expande automáticamente a slots `pipeline_alq_N_nombre` y `pipeline
 
 ---
 
-## Slides 5-12 — Pendientes de integrar
+## Slide 5 — Pipeline Q2 (operaciones pendientes de firma)
+
+Vista agregada de operaciones futuras. Tres sub-secciones independientes
+(ventas, alquileres, obra nueva) más cuatro totales en la esquina derecha.
+
+### Token global del slide
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `trimestre` | derivado | `Q{(mes-1)//3 + 1}` — calcula el trimestre del mes en curso (Q1, Q2, Q3, Q4). Usado en el título "VISIBILIDAD {trimestre}". | ✅ |
+
+### Sub-sección · Pipeline de ventas (3 columnas)
+
+Operaciones de venta señalizadas pero aún no firmadas. Se reparten en 3 columnas
+(15 slots totales con `n_max=15`).
+
+**Filtro:**
+```sql
+WHERE inmueble NOT LIKE 'ALQ.-%'         -- no alquileres
+  AND arras_firmadas = 'NO'              -- pendiente
+  AND inmueble NOT ILIKE '%victoria kent%'           -- excluye obra nueva
+  AND inmueble NOT ILIKE 'urb.%santa%b_rbara%'       -- excluye obra nueva
+```
+
+**Importante sobre el filtro:** NO excluimos `inmueble ILIKE 'urb.%'` genérico
+porque hay ventas normales con ese prefijo (ej. `Urb. Loma de Caballeros 3`).
+Solo excluimos las **promociones explícitas de obra nueva** conocidas.
+
+**`DISTINCT ON`** defensivo por `(inmueble, fecha_senal, honorarios_totales)`
+para neutralizar duplicados puntuales detectados en P-19.
+
+**Orden:** `honorarios_totales DESC`.
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `ventas_pendientes` (lista) | VC | items `{nombre, importe}`; el nombre se muestra tal cual viene de BD (sin barra Unicode) | ✅ |
+| `total_ventas_pipeline` | derivado | `SUM(honorarios_totales)` del pipeline ventas | ✅ |
+
+Slots: `venta_pend_N_nombre` y `venta_pend_N_importe` (N=1..15) via `LIST_SPECS`.
+
+### Sub-sección · Pipeline de alquileres
+
+Reutiliza la lista `pipeline_alquiler` del slide 4 (mismas operaciones, mismos
+slots, distinta tokenización: `venta_alq_pend_N_*` con `n_max=5`).
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `pipeline_alquiler` (lista, reusada) | VC | (idem slide 4, ver allí) | ✅ |
+| `total_pipeline_alquiler` | derivado | (idem slide 4) | ✅ |
+
+### Sub-sección · Arras por obra nueva
+
+Operaciones de las dos promociones conocidas de obra nueva: `C. VICTORIA KENT` y
+`Urb. Altos de Santa Bárbara`. Cada una agrupa N unidades (cada piso/planta es
+una fila en BD).
+
+**Filtro especial:** las obras nuevas NO se rigen por `arras_firmadas = 'SI'`
+como las ventas normales. Incluimos cualquier estado EXCEPTO `'CAÍDA - 0'`
+(usando `IS DISTINCT FROM` para preservar `NULL`).
+
+```sql
+WHERE arras_firmadas IS DISTINCT FROM 'CAÍDA - 0'
+  AND (inmueble ILIKE '%victoria kent%'
+       OR inmueble ILIKE 'urb.%santa%b_rbara%')
+GROUP BY promocion
+```
+
+El `CASE WHEN` mapea las variantes ortográficas (con/sin tilde, mayúsculas,
+nº de unidad) a un nombre canónico por promoción.
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `obras_nuevas` (lista) | VC | items `{nombre, importe}` con N=1..2; los slots 3-4 quedarán vacíos | ✅ |
+| `total_obra_nueva` | derivado | `SUM(honorarios_totales)` del agrupado | ✅ |
+
+Slots: `obra_nueva_N_nombre` y `obra_nueva_N_importe` (N=1..4) via `LIST_SPECS`.
+
+### Sub-sección · Totales agregados (esquina derecha)
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `total_ventas_pipeline` | derivado | (ver arriba) | ✅ |
+| `total_obra_nueva` | derivado | (ver arriba) | ✅ |
+| `total_pipeline_alquiler` | derivado | (idem slide 4) | ✅ |
+| `total_pipeline` | derivado | `total_ventas + total_obra_nueva + total_pipeline_alquiler` | ✅ |
+| `n_ops_pipeline` | derivado | suma de COUNT(*) de las 3 sub-secciones | ✅ |
+
+### Decisión arquitectónica pendiente: tabla `promociones_obra_nueva`
+
+Las 2 promociones están hardcoded en el `CASE WHEN` y en el `WHERE` de la query
+de obra nueva. Si aparece una tercera promoción (ej. `Urb. Nuevo Horizonte`),
+hay que añadirla manualmente en código.
+
+Cuando lleguemos a 3+ promociones, migrar a una tabla:
+```sql
+CREATE TABLE informes_financieros.promociones_obra_nueva (
+    pattern_ilike   TEXT PRIMARY KEY,  -- '%victoria kent%', 'urb.%santa%b_rbara%'
+    nombre_visible  TEXT NOT NULL      -- 'C. VICTORIA KENT'
+);
+```
+
+Y el calculator lee la tabla y construye el `CASE WHEN` dinámicamente.
+
+### Discrepancia conocida
+
+Los totales del calculator no coinciden exactamente con el PDF original de abril 2026:
+- Obra nueva Victoria Kent: calculator `94.240 €` vs PDF `94.240 €` ✅
+- Obra nueva Altos Sta Bárbara: calculator `587.450 €` vs PDF `505.850 €` ⚠️
+
+La diferencia de Santa Bárbara (~82k €) está pendiente de validar con
+contabilidad. Los datos en BD están correctos según el cliente, pero no
+sabemos qué subconjunto contemplaba el PDF original. Ver P-20 en
+`PENDIENTES.md`.
+
+---
+
+## Slides 6-12 — Pendientes de integrar
 
 Listado resumido. Cada uno tendrá su sección detallada cuando se ataque.
 
 | Slide | Contenido | Fuentes esperadas | Notas |
 |---|---|---|---|
-| 5 | Pipeline Q2 | VC con `arras_firmadas != 'SI'` + 3 listas (ventas/alquiler/obra nueva) | 3 columnas variables |
 | 6 | Operaciones condicionadas | VC `WHERE condicionadas='SI' AND fecha_no_condicionada IS NULL` | Tabla `n_max=12` |
 | 7 | Cobros pendientes | tabla nueva (¿`cobros_pendientes`?) — fuente sin confirmar | Tabla 2 columnas, `n_max=20` |
 | 8 | Break Even abril | CM (break_even, ingresos_margen_*, ebitda) + narrativa | Narrativa templating determinista (P-07) |

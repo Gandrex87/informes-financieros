@@ -160,3 +160,10 @@ def format_mes_short_upper_year(anyo: int, mes: int) -> str:
     """4, 2025 -> 'ABR'25'."""
     yy = str(anyo)[-2:]
     return f"{MESES_ES_SHORT[mes].upper()}'{yy}"
+
+
+def format_trimestre(mes: int) -> str:
+    """4 -> 'Q2', 7 -> 'Q3', etc. Trimestre al que pertenece el mes."""
+    if not 1 <= mes <= 12:
+        return ""
+    return f"Q{(mes - 1) // 3 + 1}"
