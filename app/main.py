@@ -7,12 +7,14 @@ Endpoints:
 """
 import logging
 import os
+import secrets
 import unicodedata
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi.security import APIKeyHeader
 from googleapiclient.errors import HttpError
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,12 +33,41 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 logger = logging.getLogger(__name__)
 
 
+# --- Autenticacion por API Key ---
+# Si API_KEY esta definida en .env, los endpoints de generacion la exigen
+# en el header X-API-Key. Si NO esta definida, el servicio funciona SIN auth
+# (modo local/desarrollo) avisando con un warning. En produccion: definir
+# siempre API_KEY.
+_API_KEY = os.environ.get("API_KEY", "").strip()
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def require_api_key(api_key: str | None = Depends(_api_key_header)) -> None:
+    """Dependency que valida el header X-API-Key.
+
+    - Sin API_KEY configurada: pasa siempre (modo local), warning al arrancar.
+    - Con API_KEY: exige que el header coincida exactamente (comparacion
+      en tiempo constante para no filtrar info por timing).
+    """
+    if not _API_KEY:
+        return  # modo sin auth (local/desarrollo)
+    if not api_key or not secrets.compare_digest(api_key, _API_KEY):
+        raise HTTPException(status_code=401, detail="API Key invalida o ausente.")
+
+
 # Clientes Google reusados entre requests (auth una sola vez al arrancar).
 _clients: dict = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if _API_KEY:
+        logger.info("API Key ACTIVADA: los endpoints de generacion exigen X-API-Key.")
+    else:
+        logger.warning(
+            "API Key NO configurada: el servicio acepta peticiones sin "
+            "autenticacion. Define API_KEY en .env antes de produccion."
+        )
     logger.info("Inicializando clientes Google...")
     slides, drive = build_clients(ROOT)
     _clients["slides"] = slides
@@ -76,7 +107,7 @@ def health():
     return HealthResponse(status="ok", template_id=template_id, user_email=user_email)
 
 
-@app.post("/generar-informe")
+@app.post("/generar-informe", dependencies=[Depends(require_api_key)])
 def generar_informe(req: GenerarInformeRequest):
     """Genera el informe y devuelve el PDF binario.
 
@@ -100,7 +131,7 @@ def generar_informe(req: GenerarInformeRequest):
     )
 
 
-@app.post("/generar-desde-db")
+@app.post("/generar-desde-db", dependencies=[Depends(require_api_key)])
 def generar_desde_db(req: GenerarDesdeDBRequest):
     """Genera el informe leyendo los datos directamente de Postgres.
 

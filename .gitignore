@@ -1,6 +1,6 @@
 # Credenciales — NUNCA subir a git
 credentials/
-
+tests/
 experiments/
 
 # Variables de entorno
@@ -20,7 +20,7 @@ env/
 ENV/
 *.egg-info/
 .pytest_cache/
-
+.claude
 # Output
 output/
 
@@ -36,3 +36,7 @@ informes_valencia_alicante/
 # OS
 .DS_Store
 Thumbs.db
+
+scripts/check_tokens.py
+
+docs/API_SPEC.md

@@ -4,8 +4,9 @@ services:
     container_name: informes-financieros-api
     restart: unless-stopped
     ports:
-      # Host 8011 -> Contenedor 8000 (acceso desde fuera de Docker)
-      - "8011:8000"
+      # Puerto del host configurable por entorno (el contenedor siempre 8000).
+      # Local: HOST_PORT ausente -> 8011. Produccion: HOST_PORT=8012 en .env.
+      - "${HOST_PORT:-8011}:8000"
     environment:
       OAUTH_CLIENT_FILE: credentials/oauth_client.json
       OAUTH_TOKEN_FILE: credentials/token.json
@@ -18,6 +19,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_SCHEMA_VENTAS: ${POSTGRES_SCHEMA_VENTAS:-finanzas_automation}
       POSTGRES_SCHEMA_INFORMES: ${POSTGRES_SCHEMA_INFORMES:-informes_financieros}
+      # Si vacia, el servicio funciona sin auth. En produccion: definir.
+      API_KEY: ${API_KEY:-}
     volumes:
       # Credenciales: read-write porque el token se refresca solo
       - ./credentials:/service/credentials
