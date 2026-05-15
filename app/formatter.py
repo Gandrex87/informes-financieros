@@ -39,6 +39,15 @@ def format_euro(value: Number, decimales: int = 0) -> str:
     return f"{sign}{entero_fmt} €"
 
 
+def format_numero(value: Number, decimales: int = 0) -> str:
+    """Como format_euro pero SIN el simbolo €. Ej: 204392 -> '204.392'.
+
+    Usado en slide 7 donde el total se muestra sin moneda.
+    """
+    euro = format_euro(value, decimales)
+    return euro.replace(" €", "").strip()
+
+
 def format_pct(value: Number, decimales: int = 2) -> str:
     """Convierte 0.6116 -> '61,16 %'. El valor llega como decimal (0..1)."""
     d = _to_decimal(value)
@@ -140,6 +149,11 @@ def format_mes_capitalizado(mes: int) -> str:
     if not 1 <= mes <= 12:
         return ""
     return MESES_ES[mes]
+
+
+def format_mes_upper(mes: int) -> str:
+    """4 -> 'ABRIL'. Solo nombre del mes en mayusculas, sin año."""
+    return format_mes_capitalizado(mes).upper()
 
 
 def format_mes_anyo(anyo: int, mes: int) -> str:

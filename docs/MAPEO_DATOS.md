@@ -25,6 +25,59 @@ Este documento sirve a la vez como:
 
 ---
 
+## ⚠️ IMPORTANTE: el informe es HÍBRIDO (foto histórica + estado vivo)
+
+Antes de leer los slides, hay que entender una característica clave del diseño
+actual: **no todos los datos del informe son reproducibles para un mes pasado**.
+
+El informe mezcla dos naturalezas de datos:
+
+### 🟢 Datos HISTÓRICOS — respetan el mes pedido (reproducibles)
+
+Salen de tablas **inmutables** (una fila por mes, no se sobrescriben). Si pides
+el informe de marzo 2026 en septiembre, estos datos serán **los de marzo**:
+
+| Concepto | Fuente | Por qué es fiable |
+|---|---|---|
+| Ingresos, márgenes, rentabilidad, break even, EBITDA | `contabilidad_mensual` | Snapshot mensual cargado del Sheet, una fila por (sede, escenario, anyo, mes) |
+| Comisiones cobradas del mes (ventas y alquileres) | `resumen_mensual_arras__sin_condicion`, `resumen_mensual_alquileres` | Tablas resumen mensual, una fila por mes |
+| Reservas / contratos del mes (importes y conteos) | `ventas_comerciales` filtrado por `fecha_senal`/`fecha_arras` en el mes | El filtro es por fecha del evento, que no cambia |
+| Comparativas MoM / YoY | derivadas de los anteriores | Cálculo relativo al mes pedido |
+
+### 🔴 Datos de ESTADO VIVO — reflejan la foto de HOY, NO del mes pedido
+
+Salen de `ventas_comerciales` filtrando por **estado actual** de la operación.
+`ventas_comerciales` es una tabla mutable: cuando una operación cambia de
+estado (de pendiente a firmada, de condicionada a liberada), su fila **se
+actualiza**, no se guarda una versión histórica. Por tanto **no se puede saber
+qué estado tenía una operación en un mes pasado**.
+
+| Concepto | Slide | Filtro | Por qué NO es histórico |
+|---|---|---|---|
+| Pipeline pendiente de alquiler | 4, 5 | `arras_firmadas='NO'` (vivas) | Muestra lo pendiente AHORA, no al cierre del mes pedido |
+| Pipeline pendiente de ventas | 5 | `arras_firmadas='NO'` (vivas) | Idem |
+| Obra nueva | 5 | estado actual de las promociones | Idem |
+| Operaciones condicionadas | 6 | `pendiente_fecha_condicionada=TRUE` | Muestra las condicionadas vivas AHORA |
+
+### Consecuencia práctica
+
+- El informe es **fiable si se genera al cierre del mes** (primeros días del
+  mes siguiente): en ese momento el "estado vivo" coincide con el "estado al
+  cierre".
+- Si se **regenera un mes pasado** tiempo después: los KPIs financieros salen
+  correctos, pero el pipeline / condicionadas reflejan el estado de hoy, no el
+  de aquel cierre. Sería un informe parcialmente inconsistente.
+
+### Solución futura (no implementada)
+
+Tabla `informes_financieros.reportes_generados` que guarde el **payload JSON
+completo** al generar cada informe, con `(sede, anyo, mes, generado_at)`. Al
+regenerar un mes, usar el snapshot guardado en lugar de recalcular. Esto da
+reproducibilidad total. Pendiente — ver decisión en memoria del proyecto y
+P-08 en PENDIENTES.md.
+
+---
+
 ## Slide 1 — Portada
 
 KPIs principales y identificación del informe.
@@ -518,15 +571,111 @@ confirme la fuente real.
 
 ---
 
-## Slides 7, 8, 9, 10 — Pendientes de integrar
+## Slide 9 — Comisiones de directores
+
+Slide multi-fuente con cálculos derivados. Tres partes: A (firmado y cobrado
+en el mes) ✅, B (cálculo final) ✅, C (tabla de atrasos) ⏳ pendiente fuente.
+
+### Token global del slide
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `mes_informe_upper` | derivado | `format_mes_upper(mes)` → `"ABRIL"` (mes en mayúsculas sin año). Usado en "FIRMADO Y COBRADO EN ABRIL". | ✅ |
+| `ingresos_totales` | CM | (heredado del slide 2) — banner superior | ✅ |
+| `tramo_comision` | constante | `"3 %"` (`TRAMO_COMISION_LABEL`). Pendiente escala por volumen (P-22). | ⏳ provisional |
+
+### Parte A — Firmado y cobrado en el mes ✅
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `ventas_cobradas_mes` | `resumen_mensual_arras__sin_condicion.cobradas` | filtro `anio` + `mes` (string 3 letras). Solo Valencia. | ✅ |
+| `comision_ventas_mes` | derivado | `ventas_cobradas_mes × TRAMO_COMISION_PCT` (0.03) | ✅ |
+| `alquileres_cobrados_mes` | `resumen_mensual_alquileres.honorarios_cobrados` | filtro `anio` + `mes`. OJO: esta tabla usa `'sept'` (4 letras) para septiembre, la otra usa `'sep'`. | ✅ |
+| `comision_alquileres_mes` | derivado | `alquileres_cobrados_mes × 0.03` | ✅ |
+| `subtotal_comision_mes` | derivado | `comision_ventas_mes + comision_alquileres_mes` | ✅ |
+
+### Parte B — Cálculo final ✅ (con constante provisional)
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `subtotal_comision_atrasos` | constante provisional | `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL = 1021.89`. Hardcoded del mock hasta confirmar fuente de la Parte C (P-23). | ⏳ provisional |
+| `total_comision_repartir` | derivado | `subtotal_comision_mes + subtotal_comision_atrasos` | ✅ |
+| `comision_variable_por_director` | derivado | `total_comision_repartir / N_DIRECTORES` (N=2) | ✅ |
+| `sueldo_fijo_director` | constante | `SUELDO_FIJO_DIRECTOR = 2666.67` (bruto mensual, provisional) | ⏳ provisional |
+| `total_por_director` | derivado | `comision_variable_por_director + sueldo_fijo_director` | ✅ |
+
+**Constantes del slide 9 — dónde cambiarlas (cabecera de `calculator.py`):**
+
+| Constante | Cambiar cuando... |
+|---|---|
+| `N_DIRECTORES` | entre o salga un director (marcado con `>>> ... <<<` en código) |
+| `SUELDO_FIJO_DIRECTOR` | cambie el sueldo fijo bruto |
+| `TRAMO_COMISION_PCT` / `TRAMO_COMISION_LABEL` | contabilidad confirme la escala de tramos (P-22) |
+| `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL` | se confirme la fuente de "COBRADO DE MESES ANTERIORES" (P-23) |
+
+Buscar `PROVISIONAL` o `>>>` en el código localiza todos estos puntos.
+
+### Parte C — Tabla "COBRADO DE MESES ANTERIORES" ⏳
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `comisiones_atrasos` (lista, `n_max=10`) | sin confirmar | Tabla de operaciones de meses anteriores cobradas este mes (nombre, mes origen, tramo, importe) | ⏳ pendiente fuente (P-23) |
+
+Cuando se confirme la fuente, `subtotal_comision_atrasos` pasará a calcularse
+como la suma de esta lista en lugar de la constante provisional.
+
+---
+
+## Slide 7 — Cobros pendientes de liquidación
+
+Tarjeta resumen a la izquierda + tabla 2 columnas a la derecha.
+
+**⚠️ Es un dato de "estado vivo"** (ver sección HÍBRIDO al inicio): muestra los
+cobros pendientes AHORA, no al cierre del mes pedido. Sin filtro de mes.
+
+### Fuente
+
+Tabla `informes_financieros.pago_agentes`, columna `pte_facturar` (TEXT).
+Valores posibles: `'CAÍDA'`, `'0'`, o un número `> 0` (lo pendiente).
+
+**Filtro:**
+```sql
+WHERE pte_facturar ~ '^[0-9]+\.?[0-9]*$'   -- numérico puro (descarta 'CAÍDA')
+  AND CAST(pte_facturar AS NUMERIC) > 1     -- umbral anti-basura-float (P-24)
+ORDER BY importe DESC
+```
+
+El umbral `> 1` descarta basura de coma flotante de la ingesta
+(`'0.21000000000003638'` y similares). Ver P-24.
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `cobros_pendientes` (lista) | `pago_agentes` | items `{nombre=inmueble, importe}`, redondeados a entero (`format_euro`). `n_max=20`, 2 columnas, slots 1-10 izq / 11-20 der | ✅ |
+| `total_pendiente_cobro_sin_euro` | derivado | suma de **TODOS** los cobros filtrados (no solo los 20 mostrados), formateado sin `€` | ✅ |
+| `nota_cobros` | constante vacía | reservado para texto manual, no automatizable hoy | ⏳ |
+
+**Token relacionado en slide 12:** `total_pendiente_cobro` (con `€`) deriva del
+mismo cálculo. Slide 7 y slide 12 muestran el mismo número, coherente.
+
+**Texto dinámico en plantilla:** "Prioridad {{mes_siguiente_capitalizado}}:"
+(el cobro se prioriza el mes posterior al cierre).
+
+### ⚠️ P-25 — Riesgo: más cobros que slots
+
+Si hay más de 20 cobros (datos reales: 31), la tabla **trunca a 20** pero el
+total incluye los 31. El lector ve 20 filas + un total que no cuadra al
+sumarlas. **Decisión de negocio pendiente** (ampliar slots / top N + resumen /
+filtro). Ver P-25 en PENDIENTES.md. El mismo riesgo aplica a slides 5 y 6.
+
+---
+
+## Slides 8, 10 — Pendientes de integrar
 
 Listado resumido. Cada uno tendrá su sección detallada cuando se ataque.
 
 | Slide | Contenido | Fuentes esperadas | Notas |
 |---|---|---|---|
-| 7 | Cobros pendientes | tabla nueva (¿`cobros_pendientes`?) — fuente sin confirmar | Tabla 2 columnas, `n_max=20`. Pausado hasta confirmar fuente. |
 | 8 | Break Even abril | CM (break_even, ingresos_margen_*, ebitda) + narrativa | Narrativa templating determinista (P-07) |
-| 9 | Comisiones directores | VC (cobradas mes) + CM (% comisión) + tabla atrasos | Multi-fuente, tabla `n_max=10` |
 | 10 | Break Even mayo (proyección) | CM mes+1 (proyectados) | Mismo patrón que slide 8 sin narrativa |
 
 ---

@@ -57,20 +57,20 @@ LIST_SPECS = [
     {
         "key": "cobros_pendientes",
         "prefix": "cobro",
-        "n_max": 20,
+        "n_max": 26,
         "fields": ["nombre", "importe"],
     },
     {
         "key": "ventas_pendientes",
         "prefix": "venta_pend",
-        "n_max": 15,
+        "n_max": 18,
         "fields": ["nombre", "importe"],
     },
     {
         # Reutiliza la lista del slide 4 con prefijo distinto para slide 5.
         "key": "pipeline_alquiler",
         "prefix": "venta_alq_pend",
-        "n_max": 5,
+        "n_max": 6,
         "fields": ["nombre", "importe"],
     },
     {

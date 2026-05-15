@@ -103,7 +103,9 @@ from app.formatter import (
     format_mes_capitalizado,
     format_mes_short_anyo,
     format_mes_short_upper_year,
+    format_mes_upper,
     format_mes_year3_upper,
+    format_numero,
     format_pct,
     format_pct_signed,
     format_pct_with_arrow,
@@ -114,10 +116,34 @@ logger = logging.getLogger(__name__)
 
 OBJETIVO_RENTABILIDAD = "20 %"  # constante corporativa
 
-# Slide 12 - constantes provisionales pendientes de confirmar con contabilidad
-# y/o de fuentes externas no integradas todavia.
+# Slide 9 - tramo de comision. Hoy fijo al 3%. Pendiente que contabilidad
+# confirme si es una escala por volumen de facturacion (ver P-22).
+TRAMO_COMISION_PCT = Decimal("0.03")  # 3%
+TRAMO_COMISION_LABEL = "3 %"
+
+# Slide 9 - parametros del calculo de comision por director.
+# TODO multi-sede / parametros_sede_mes: cuando varie por sede o entre
+# otro director, mover estos valores a una tabla parametros_sede_mes
+# con clave (sede, anyo, mes). Por ahora son constantes de Valencia.
+#
+# >>> SI ENTRA / SALE UN DIRECTOR: cambiar N_DIRECTORES aqui. <<<
+# Afecta a comision_variable_por_director = total_a_repartir / N_DIRECTORES.
+N_DIRECTORES = 2  # Valencia, constante provisional
+SUELDO_FIJO_DIRECTOR = Decimal("2666.67")  # bruto mensual por director, provisional
+# Subtotal de "COBRADO DE MESES ANTERIORES". Fuente real sin confirmar
+# (pendiente contabilidad, ver P-23). Hardcoded del mock para validar la
+# sumatoria de la zona inferior del slide 9.
+SUBTOTAL_COMISION_ATRASOS_PROVISIONAL = Decimal("1021.89")
+
+# Slide 12 - constante provisional pendiente de confirmar con contabilidad.
+# (total_pendiente_cobro ya NO es provisional: deriva de pago_agentes,
+#  igual que slide 7).
 INVERSION_TECNOLOGICA_PROVISIONAL = "27k€"  # pendiente origen (¿constante anual? ¿acumulado?)
-TOTAL_PENDIENTE_COBRO_PROVISIONAL = "204.392 €"  # slide 7 bloqueado, sin fuente confirmada
+
+# Mapeo numero de mes -> string usado en las tablas resumen_mensual_*.
+# Septiembre tiene dos variantes segun la tabla (ver _mes_label_*).
+_MES_LABEL_3 = ["", "ene", "feb", "mar", "abr", "may", "jun",
+                "jul", "ago", "sep", "oct", "nov", "dic"]
 
 
 @dataclass
@@ -368,6 +394,76 @@ def _clasifica_impacto(volumen_riesgo: Decimal | None) -> tuple[str, str]:
     return ("Crítico", "rojo")
 
 
+def _query_cobros_pendientes() -> list[dict]:
+    """Cobros pendientes de liquidacion (slide 7).
+
+    Fuente: informes_financieros.pago_agentes, columna pte_facturar (TEXT).
+    pte_facturar puede ser: 'CAÍDA', '0', o un numero > 0 (lo pendiente).
+
+    Filtro:
+    - Solo strings numericos puros (descarta 'CAÍDA').
+    - Valor > 1 para descartar basura de coma flotante de la ingesta
+      (ej. '0.21000000000003638' que es ruido, no un cobro real). Ver P-24.
+
+    Sin filtro de mes: es el estado vivo de cobros pendientes (dato de tipo
+    "foto actual", ver seccion HIBRIDO en docs/MAPEO_DATOS.md).
+
+    Ordenado por importe descendente.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
+    sql = f"""
+        SELECT inmueble, CAST(pte_facturar AS NUMERIC) AS importe
+        FROM {schema}.pago_agentes
+        WHERE pte_facturar ~ '^[0-9]+\\.?[0-9]*$'
+          AND CAST(pte_facturar AS NUMERIC) > 1
+        ORDER BY importe DESC;
+    """
+    with connection() as conn:
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+    return [{"inmueble": r["inmueble"], "importe": r["importe"]} for r in rows]
+
+
+def _query_arras_cobradas_mes(anyo: int, mes: int) -> Decimal | None:
+    """Lee resumen_mensual_arras__sin_condicion.cobradas para un mes.
+
+    Es la base de calculo de la comision de ventas del slide 9.
+    Filtro por anio + mes (string 3 letras, ej. 'abr'). Solo Valencia.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    mes_label = _MES_LABEL_3[mes]
+    sql = f"""
+        SELECT cobradas
+        FROM {schema}.resumen_mensual_arras__sin_condicion
+        WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+    """
+    with connection() as conn:
+        cur = conn.execute(sql, {"anyo": anyo, "mes_label": mes_label})
+        row = cur.fetchone()
+    return row["cobradas"] if row else None
+
+
+def _query_alquileres_cobrados_mes(anyo: int, mes: int) -> Decimal | None:
+    """Lee resumen_mensual_alquileres.honorarios_cobrados para un mes.
+
+    Base de calculo de la comision de alquileres del slide 9.
+    OJO: esta tabla usa 'sept' (4 letras) para septiembre, distinto a
+    resumen_mensual_arras__sin_condicion que usa 'sep'. Para mes != 9
+    el label de 3 letras funciona en ambas.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    mes_label = "sept" if mes == 9 else _MES_LABEL_3[mes]
+    sql = f"""
+        SELECT honorarios_cobrados
+        FROM {schema}.resumen_mensual_alquileres
+        WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+    """
+    with connection() as conn:
+        cur = conn.execute(sql, {"anyo": anyo, "mes_label": mes_label})
+        row = cur.fetchone()
+    return row["honorarios_cobrados"] if row else None
+
+
 def _query_pipeline_alquileres() -> list[dict]:
     """Lista de alquileres con señal pero sin contrato firmado todavia.
 
@@ -464,6 +560,13 @@ def build_payload_slide_2(
 
     # Slide 6: operaciones condicionadas
     condicionadas_rows = _query_operaciones_condicionadas()
+
+    # Slide 7: cobros pendientes de liquidacion
+    cobros_pendientes_rows = _query_cobros_pendientes()
+
+    # Slide 9: comisiones (zona "FIRMADO Y COBRADO EN <mes>")
+    arras_cobradas = _query_arras_cobradas_mes(anyo, mes)
+    alq_cobrados = _query_alquileres_cobrados_mes(anyo, mes)
 
     if cont_actual is None:
         raise ValueError(
@@ -576,6 +679,31 @@ def build_payload_slide_2(
     )
     n_ops_condicionadas = len(condicionadas_rows)
     impacto_etiqueta, impacto_color = _clasifica_impacto(volumen_riesgo)
+
+    # --- Slide 7: cobros pendientes de liquidacion ---
+    cobros_pendientes = [
+        {"nombre": row["inmueble"], "importe": format_euro(row["importe"])}
+        for row in cobros_pendientes_rows
+    ]
+    total_pendiente_cobro_num = sum(
+        (Decimal(str(row["importe"])) if row["importe"] else Decimal(0))
+        for row in cobros_pendientes_rows
+    )
+
+    # --- Slide 9: comisiones (Parte A: firmado y cobrado en el mes) ---
+    # La comision es el tramo (hoy 3%) sobre lo cobrado.
+    ventas_cobradas = arras_cobradas if arras_cobradas is not None else Decimal(0)
+    alquileres_cobrados = alq_cobrados if alq_cobrados is not None else Decimal(0)
+    comision_ventas_mes = ventas_cobradas * TRAMO_COMISION_PCT
+    comision_alquileres_mes = alquileres_cobrados * TRAMO_COMISION_PCT
+    subtotal_comision_mes = comision_ventas_mes + comision_alquileres_mes
+
+    # Parte B: calculo final. subtotal_atrasos hoy es constante provisional
+    # (pendiente fuente real de "COBRADO DE MESES ANTERIORES", P-23).
+    subtotal_comision_atrasos = SUBTOTAL_COMISION_ATRASOS_PROVISIONAL
+    total_comision_repartir = subtotal_comision_mes + subtotal_comision_atrasos
+    comision_variable_por_director = total_comision_repartir / N_DIRECTORES
+    total_por_director = comision_variable_por_director + SUELDO_FIJO_DIRECTOR
 
     # Ticket medio = contratos_firmados / n_ops_contratos
     ticket_medio = None
@@ -728,11 +856,33 @@ def build_payload_slide_2(
         "n_ops_pipeline_alquiler": format_int(n_ops_pipeline_alquiler),
         "nota_pipeline_alquiler": "",  # vacia por ahora (decision tomada)
 
+        # --- Slide 7: Cobros pendientes de liquidación ---
+        "cobros_pendientes": cobros_pendientes,
+        "total_pendiente_cobro_sin_euro": format_numero(total_pendiente_cobro_num),
+        "nota_cobros": "",  # vacia por ahora (decision tomada, como slide 4)
+
         # --- Slide 6: Operaciones condicionadas ---
         "operaciones_condicionadas": operaciones_condicionadas,
         "volumen_riesgo": format_euro(volumen_riesgo),
         "n_ops_condicionadas": format_int(n_ops_condicionadas),
         "impacto_facturacion": impacto_etiqueta,
+
+        # --- Slide 9: Comisiones (Parte A: firmado y cobrado en el mes) ---
+        # Mes del informe en mayusculas sin año, para "FIRMADO Y COBRADO EN ABRIL".
+        "mes_informe_upper": format_mes_upper(mes),
+        "tramo_comision": TRAMO_COMISION_LABEL,
+        "ventas_cobradas_mes": format_euro(ventas_cobradas, decimales=2),
+        "comision_ventas_mes": format_euro(comision_ventas_mes, decimales=2),
+        "alquileres_cobrados_mes": format_euro(alquileres_cobrados, decimales=2),
+        "comision_alquileres_mes": format_euro(comision_alquileres_mes, decimales=2),
+        "subtotal_comision_mes": format_euro(subtotal_comision_mes, decimales=2),
+
+        # Slide 9 Parte B: calculo final (subtotal_atrasos provisional)
+        "subtotal_comision_atrasos": format_euro(subtotal_comision_atrasos, decimales=2),
+        "total_comision_repartir": format_euro(total_comision_repartir, decimales=2),
+        "comision_variable_por_director": format_euro(comision_variable_por_director, decimales=2),
+        "sueldo_fijo_director": format_euro(SUELDO_FIJO_DIRECTOR, decimales=2),
+        "total_por_director": format_euro(total_por_director, decimales=2),
 
         # --- Slide 11: Semáforo estratégico ---
         # Asignacion de KPIs a columnas es fija (no dinamica).
@@ -756,7 +906,9 @@ def build_payload_slide_2(
         # especificos del slide.
         "mes_siguiente_upper": format_mes_anyo_upper(anyo_next, mes_next),
         "inversion_tecnologica": INVERSION_TECNOLOGICA_PROVISIONAL,
-        "total_pendiente_cobro": TOTAL_PENDIENTE_COBRO_PROVISIONAL,
+        # Ya NO es provisional: deriva del mismo calculo que slide 7
+        # (con € aqui porque el slide 12 muestra el simbolo).
+        "total_pendiente_cobro": format_euro(total_pendiente_cobro_num),
 
         # --- Slide 5: Pipeline Q2 ---
         # Trimestre del mes en curso (Q1, Q2, Q3, Q4)

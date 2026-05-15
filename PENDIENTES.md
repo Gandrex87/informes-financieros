@@ -9,8 +9,10 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 - **Sprint 6** ✅: slide 6 completo (operaciones condicionadas + tarjeta de alerta con severidad y color condicional).
 - **Sprint 7** ✅: slide 11 completo (semáforo estratégico con asignación fija + 5 tokens nuevos + fix URL Drive→Slides para gráficos).
 - **Sprint 8** ✅: slide 12 completo (hoja de ruta con tokens reutilizados + 2 constantes provisionales pendientes).
+- **Sprint 9** ✅ (parcial): slide 9 Partes A y B (firmado/cobrado del mes + cálculo final). Parte C (tabla atrasos) pausada por fuente sin confirmar. Documentado el carácter HÍBRIDO del informe.
+- **Sprint 10** ✅: slide 7 (cobros pendientes desde `pago_agentes`) + `total_pendiente_cobro` del slide 12 ahora deriva de la misma fuente (ya no provisional).
 
-Próximos pasos: extender calculator a slides 8, 9, 10. Slide 7 pausado (pendiente fuente de datos). Validar P-18, P-20 y constantes provisionales con contabilidad. Operacionalización (cuenta corporativa).
+Próximos pasos: slides 8 y 10 (Break Even). Slide 9 Parte C pendiente fuente. Decisión P-25 (cobros que no caben). Validar P-18, P-20..P-24 con contabilidad.
 
 ---
 
@@ -82,10 +84,11 @@ Próximos pasos: extender calculator a slides 8, 9, 10. Slide 7 pausado (pendien
 - Color override de `volumen_riesgo_short`: hereda umbrales de `_clasifica_impacto()` del slide 6.
 - Color override de `var_*_mom_observacion`: amarillo siempre (semántica de la columna).
 
-### Fix técnico — URL de imagen para Slides API
-- Cambiado en `app/image_helpers.py`: el endpoint `drive.google.com/uc?id=X` ya no es fiable (a veces devuelve HTML de virus-scan en lugar de bytes de imagen).
-- Reemplazado por `drive.google.com/thumbnail?id=X&sz=w2000` que sirve bytes directos.
-- Afecta a la inserción del gráfico del slide 3 (volvió a funcionar tras el cambio).
+### Fix técnico — URL de imagen + timing para Slides API
+- Cambiado en `app/image_helpers.py`: el endpoint `drive.google.com/uc?id=X` ya no es fiable (a veces devuelve HTML de virus-scan en lugar de bytes de imagen). Reemplazado por `drive.google.com/thumbnail?id=X&sz=w2000` que sirve bytes directos.
+- Añadido `_wait_public_url_ready()`: tras subir el PNG y darle permiso público, espera hasta 10s a que la URL responda 200 antes de pasársela a Slides API. Necesario porque la propagación interna de Drive puede tardar unos segundos.
+- Añadido reintento con backoff exponencial en `replace_shape_with_image` (hasta 3 intentos, esperas 1s → 2s → 4s). Solo reintenta si el error es "image not publicly accessible"; cualquier otro error se propaga inmediatamente.
+- Resultado: cero deps nuevas (urllib de stdlib), tolerancia a timing inestable de Drive, comportamiento silencioso cuando todo va bien.
 
 ### Slide 12 — Hoja de ruta
 - La mayoría de tokens son **reutilizados** de slides anteriores (volumen_riesgo, n_ops_condicionadas, total_pipeline, n_ops_pipeline, objetivo_rentabilidad, trimestre).
@@ -102,6 +105,47 @@ Próximos pasos: extender calculator a slides 8, 9, 10. Slide 7 pausado (pendien
 ---
 
 ## 🟡 Discrepancias en observación — verificar con contabilidad
+
+### P-25 · Slide 7 — más cobros que slots en la plantilla (DECISIÓN DE NEGOCIO)
+
+Los datos reales de cobros pendientes superan los slots de la plantilla:
+`slots('cobro'): 31 items pero n_max=20. Truncando.`
+
+**Estado actual:**
+- El `total_pendiente_cobro` se calcula sobre los **31** (TODOS), es correcto.
+- La tabla solo muestra **20** (los de mayor importe, orden DESC).
+- Consecuencia: el lector ve 20 filas + un total que no cuadra al sumarlas (faltan 11 filas por ~la diferencia).
+
+**Es una decisión de presentación de negocio, NO técnica.** Opciones:
+
+- **A.** Ampliar `n_max` en la plantilla (¿caben 35 filas visualmente en 2 columnas sin reducir fuente? ¿y si un mes hay 50?).
+- **B.** Top 20 + fila resumen "+ N operaciones más — X €" (total siempre cuadra, escala a cualquier volumen). **Recomendada técnicamente.**
+- **C.** El total refleja solo lo mostrado (descartada: total incorrecto, engañoso en finanzas).
+- **D.** Filtro de negocio que reduzca el dataset (ej. solo > 1.000 €, o últimos N meses) — requiere criterio de contabilidad.
+
+**Acción:** preguntar a dirección/contabilidad: "Si hay 31 cobros pendientes, ¿quieren verlos todos o las 20 mayores + un resumen del resto?". Implementar según respuesta.
+
+**Mismo riesgo aplica a otros slides con listas variables** (pipeline ventas slide 5 con `n_max=18`, condicionadas slide 6 con `n_max=12`) si los datos reales superan esos topes. Vigilar los WARNING de `slots(...)` en logs.
+
+### P-24 · Basura de coma flotante en `pago_agentes.pte_facturar`
+
+La columna `pte_facturar` (TEXT) tiene valores residuales tipo `'0.21000000000003638'`, `'0.4132229999995616'` — error de precisión IEEE 754, probablemente de restas `honorarios - facturado` en la ingesta. No son cobros reales.
+
+**Mitigación aplicada:** el filtro de `_query_cobros_pendientes()` usa `> 1` (umbral anti-basura). Cualquier cobro real es ≥ cientos de €, así que es seguro.
+
+**Acción a futuro:** revisar la ingesta de `pago_agentes` para que no genere estos residuos (mantener decimales exactos / redondear en origen). Similar a P-19 (duplicados).
+
+### P-23 · Fuente de "COBRADO DE MESES ANTERIORES" (slide 9, Parte C)
+
+La tabla de atrasos del slide 9 (operaciones de meses anteriores cobradas este mes, con su tramo histórico) no tiene fuente confirmada. Hoy `subtotal_comision_atrasos` está hardcoded a `1021.89` (`SUBTOTAL_COMISION_ATRASOS_PROVISIONAL`) para validar la sumatoria de la zona inferior.
+
+**Acción:** preguntar a contabilidad de dónde sale "Cobrado de meses anteriores". Cuando se confirme: implementar `_query_comisiones_atrasos()`, poblar la lista `comisiones_atrasos`, y calcular `subtotal_comision_atrasos` como su suma (en lugar de la constante).
+
+### P-22 · Tramo de comisión — ¿constante o escala por volumen? (slide 9)
+
+Hoy `TRAMO_COMISION_PCT = 0.03` fijo. El slide dice "TRAMO MÁXIMO ALCANZADO" + "Volumen Facturación", lo que sugiere una escala por volumen de facturación.
+
+**Acción:** preguntar a contabilidad la tabla de tramos (ej. <300k → 2%, 300-500k → 3%...). Si es escala, implementar lookup por volumen en lugar de constante.
 
 ### P-21 · Origen de `inversion_tecnologica` (slide 12)
 
