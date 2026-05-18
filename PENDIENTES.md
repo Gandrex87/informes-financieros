@@ -14,7 +14,9 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 - **Sprint 11** ✅: validador de tokens (P-12), 92 tests pytest (P-13), API Key opcional (P-17), puerto y red Docker configurables por entorno.
 - **Sprint 12** ✅: **MIGRACIÓN A PRODUCCIÓN COMPLETA** (P-01). Service Account + Shared Drive corporativa (sistemas@). Servicio desplegado en el servidor, validado end-to-end desde curl y n8n. Fix del SSL idle (clientes Google por petición).
 
-Próximos pasos: slides 8 y 10 (Break Even). Slide 9 Parte C pendiente fuente. Cambiar API Key débil de producción (P-26). Decisión P-25 (cobros que no caben). Validar P-18, P-20..P-24 con contabilidad.
+- **Sprint 13** ✅: token `mes_anterior_capitalizado` (slide 2 "vs Marzo" dinámico). Incidente P-27 resuelto (ingesta cargaba NULL por cambio de etiquetas en el Sheet).
+
+Próximos pasos: slides 8 y 10 (Break Even). Slide 9 Parte C pendiente fuente. Cambiar API Key débil de producción (P-26). Decisión P-25 (cobros que no caben). Endurecer ingesta ante NULL (P-27). Validar P-18, P-20..P-24 con contabilidad.
 
 ---
 
@@ -133,6 +135,23 @@ LOCAL (dev, AUTH_METHOD=service_account igual que prod)
 ---
 
 ## 🟡 Discrepancias en observación — verificar con contabilidad
+
+### P-27 · Fragilidad de la ingesta ante cambios de etiquetas en el Excel
+
+**Incidente (2026-05-18):** `{{ingresos_totales}}` salió vacío/literal en el PDF. Causa raíz: contabilidad **cambió etiquetas de filas en el Sheet contable**, el workflow n8n de ingesta dejó de mapear esos conceptos, y `contabilidad_mensual.ingresos_contables` se cargó como NULL. El calculator y la plantilla estaban bien — el dato simplemente no existía en Postgres.
+
+**Diagnóstico que despistó:** el validador de tokens decía "coincide" (token OK en ambos lados). El problema no era el token sino el **dato origen NULL**. Aprendizaje: un token vacío en el PDF puede ser (a) token partido en runs, (b) calculator no lo produce, **(c) el dato llegó NULL de la ingesta** — esta última no la detecta `check_tokens.py`.
+
+**Patrón de fondo:** el cuadro contable del Sheet es manual; cualquier cambio de nombre de fila (etiqueta) rompe silenciosamente el mapeo `CONCEPT_TO_COLUMN` del workflow de ingesta. No hay alerta — el INSERT mete NULL y el informe sale incompleto sin avisar.
+
+**Mitigaciones a considerar (no implementadas):**
+- Validación en el workflow n8n: si un concepto esperado no se encuentra en el Sheet, fallar/alertar en lugar de insertar NULL.
+- O un check en el calculator: si `ingresos_contables IS NULL` para el mes pedido → error explícito ("contabilidad sin cargar para X") en lugar de PDF con huecos.
+- Acordar con contabilidad que NO cambien las etiquetas de fila sin avisar (las etiquetas son el contrato de la ingesta).
+
+**Estado:** incidente resuelto (ingesta corregida, datos recargados). El patrón de fragilidad queda anotado para endurecer la ingesta más adelante.
+
+
 
 ### P-25 · Slide 7 — más cobros que slots en la plantilla (DECISIÓN DE NEGOCIO)
 
