@@ -40,5 +40,8 @@ services:
 
 networks:
   n8n_net:
-    name: sesion-idealista_default
+    # Nombre de la red Docker donde corre n8n. Configurable por entorno:
+    #   Local:      DOCKER_NETWORK ausente -> sesion-idealista_default
+    #   Produccion: DOCKER_NETWORK=app-network en el .env del servidor
+    name: ${DOCKER_NETWORK:-sesion-idealista_default}
     external: true
