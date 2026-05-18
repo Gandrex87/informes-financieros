@@ -55,8 +55,15 @@ def require_api_key(api_key: str | None = Depends(_api_key_header)) -> None:
         raise HTTPException(status_code=401, detail="API Key invalida o ausente.")
 
 
-# Clientes Google reusados entre requests (auth una sola vez al arrancar).
-_clients: dict = {}
+def get_google_clients():
+    """Crea clientes Google FRESCOS por peticion.
+
+    NO se cachean al arranque: una conexion SSL idle (firewall/NAT del
+    servidor cierra conexiones inactivas) reutilizada da
+    'SSL record layer failure'. Con Service Account el coste de recrearlos
+    es minimo (firmar un JWT, milisegundos — sin flujo OAuth interactivo).
+    """
+    return build_clients(ROOT)
 
 
 @asynccontextmanager
@@ -68,13 +75,13 @@ async def lifespan(app: FastAPI):
             "API Key NO configurada: el servicio acepta peticiones sin "
             "autenticacion. Define API_KEY en .env antes de produccion."
         )
-    logger.info("Inicializando clientes Google...")
-    slides, drive = build_clients(ROOT)
-    _clients["slides"] = slides
-    _clients["drive"] = drive
-    logger.info("Clientes listos.")
+    # Validacion temprana de credenciales al arrancar (falla rapido si el
+    # service_account.json no esta o es invalido), pero NO se cachean los
+    # clientes — cada peticion crea los suyos (conexion fresca).
+    logger.info("Validando credenciales Google...")
+    build_clients(ROOT)
+    logger.info("Credenciales OK. Los clientes se crean por peticion.")
     yield
-    _clients.clear()
 
 
 app = FastAPI(
@@ -98,10 +105,9 @@ def health():
     template_id = os.environ.get("SLIDES_TEMPLATE_ID", "")
     user_email = None
     try:
-        drive = _clients.get("drive")
-        if drive:
-            about = drive.about().get(fields="user(emailAddress)").execute()
-            user_email = about.get("user", {}).get("emailAddress")
+        _slides, drive = get_google_clients()
+        about = drive.about().get(fields="user(emailAddress)").execute()
+        user_email = about.get("user", {}).get("emailAddress")
     except HttpError as e:
         logger.warning("No se pudo leer about: %s", e)
     return HealthResponse(status="ok", template_id=template_id, user_email=user_email)
@@ -114,10 +120,11 @@ def generar_informe(req: GenerarInformeRequest):
     Recibe el payload completo de tokens (mock / cliente externo lo compone).
     """
     try:
+        slides_client, drive_client = get_google_clients()
         pdf_bytes = generate_report(
             data=req.to_data_dict(),
-            slides_client=_clients["slides"],
-            drive_client=_clients["drive"],
+            slides_client=slides_client,
+            drive_client=drive_client,
         )
     except GenerationError as e:
         logger.exception("Error generando informe")
@@ -154,10 +161,11 @@ def generar_desde_db(req: GenerarDesdeDBRequest):
         raise HTTPException(status_code=500, detail=f"Error de DB: {e}")
 
     try:
+        slides_client, drive_client = get_google_clients()
         pdf_bytes = generate_report(
             data=payload,
-            slides_client=_clients["slides"],
-            drive_client=_clients["drive"],
+            slides_client=slides_client,
+            drive_client=drive_client,
         )
     except GenerationError as e:
         logger.exception("Error generando informe")
