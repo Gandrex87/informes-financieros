@@ -11,8 +11,10 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 - **Sprint 8** ✅: slide 12 completo (hoja de ruta con tokens reutilizados + 2 constantes provisionales pendientes).
 - **Sprint 9** ✅ (parcial): slide 9 Partes A y B (firmado/cobrado del mes + cálculo final). Parte C (tabla atrasos) pausada por fuente sin confirmar. Documentado el carácter HÍBRIDO del informe.
 - **Sprint 10** ✅: slide 7 (cobros pendientes desde `pago_agentes`) + `total_pendiente_cobro` del slide 12 ahora deriva de la misma fuente (ya no provisional).
+- **Sprint 11** ✅: validador de tokens (P-12), 92 tests pytest (P-13), API Key opcional (P-17), puerto y red Docker configurables por entorno.
+- **Sprint 12** ✅: **MIGRACIÓN A PRODUCCIÓN COMPLETA** (P-01). Service Account + Shared Drive corporativa (sistemas@). Servicio desplegado en el servidor, validado end-to-end desde curl y n8n. Fix del SSL idle (clientes Google por petición).
 
-Próximos pasos: slides 8 y 10 (Break Even). Slide 9 Parte C pendiente fuente. Decisión P-25 (cobros que no caben). Validar P-18, P-20..P-24 con contabilidad.
+Próximos pasos: slides 8 y 10 (Break Even). Slide 9 Parte C pendiente fuente. Cambiar API Key débil de producción (P-26). Decisión P-25 (cobros que no caben). Validar P-18, P-20..P-24 con contabilidad.
 
 ---
 
@@ -97,8 +99,34 @@ Próximos pasos: slides 8 y 10 (Break Even). Slide 9 Parte C pendiente fuente. D
 - Texto "Objetivo: Maximizar liquidez en Q2" → reemplazado en plantilla por `{{trimestre}}` para que se ajuste al trimestre del mes que se genera.
 - Barras superiores de color son fijas en plantilla (decorativas, no condicionales).
 
+### Migración a producción (P-01 — CERRADO)
+- `sistemas@lioncapitalg.com` es Google Workspace real → se migró a **Service Account** (no OAuth). El token NO caduca (resuelve el problema del refresh_token de 7 días).
+- GCP nuevo proyecto, Service Account `informes-bot-prod@...`, JSON en `credentials/service_account.json` (chmod 600, NO en git).
+- Shared Drive corporativa "Informes Financieros" (`0AE8Yvf40XImDUk9PVA`). SA miembro con rol Administrador. Plantilla copiada ahí (`1HQTRCoeiFm4Ptc6RVTNWwTfJ2jsfWkXELbJ47xkgcpU`).
+- `app/auth.py`: soporta `AUTH_METHOD` = `service_account` | `oauth` (rollback). `.env` usa `service_account`.
+- `supportsAllDrives=True` añadido a TODAS las llamadas Drive (copy/delete/create/get) — obligatorio para Shared Drives.
+- Servicio desplegado en el servidor (`/home/n8n/informes-financieros`), red `app-network`, puerto host `8012`. Validado end-to-end desde curl y n8n: PDF correcto.
+
+### Fix técnico — SSL idle connection (clientes Google por petición)
+- **Síntoma:** `SSL record layer failure` al copiar la plantilla, solo en producción y solo cuando pasaba tiempo entre el arranque del servicio y la primera petición.
+- **Causa:** los clientes Google se creaban 1 vez al arranque (`lifespan`) y se cacheaban. El firewall/NAT del servidor cierra conexiones SSL inactivas; al reutilizar una conexión muerta → SSL error. En local no pasaba (se probaba justo tras arrancar, conexión fresca).
+- **Fix:** `app/main.py` ya NO cachea clientes. `get_google_clients()` los crea **frescos por petición**. Con Service Account el coste es mínimo (firmar JWT, ~ms). El `lifespan` solo valida credenciales al arrancar.
+- **Aprendizaje transversal:** cualquier servicio que cachee clientes HTTP de larga vida detrás de un firewall con timeout de idle tendrá este problema. No cachear conexiones idle de larga duración en este servidor.
+
+### Flujo de despliegue establecido
+```
+LOCAL (dev, AUTH_METHOD=service_account igual que prod)
+  → git add/commit/push
+  → SERVIDOR: git pull + docker compose up -d --build  (--build OBLIGATORIO)
+  → smoke test: logs (Auth: Service Account) + curl /health
+```
+- `.env` y `credentials/` NO viajan por git — se configuran 1 vez por entorno.
+- Diferencias local↔prod viven solo en `.env`: `HOST_PORT` (8011/8012), `DOCKER_NETWORK` (sesion-idealista_default / app-network), `API_KEY`.
+- ⚠️ Si un cambio introduce una **variable de entorno nueva**: hay que añadirla manualmente al `.env` del servidor (el `git pull` trae el compose pero no el `.env`). Señalarlo explícitamente en cada cambio así.
+
 ### Documentación
 - `docs/MAPEO_DATOS.md`: tabla por slide con tokens, fuentes, fórmulas y estado.
+- `docs/API_SPEC.md`: spec para consumo desde el ERP (endpoints, auth, errores, puerto).
 - `PENDIENTES.md` (este documento).
 - Memoria del proyecto en `~/.claude/projects/.../memory/` con decisiones arquitectónicas.
 
@@ -222,25 +250,28 @@ Diferencias consistentes: `ventas_comerciales` cuenta MENOS que los cuadros manu
 
 ## 🔥 Bloqueantes / Decisiones externas
 
-### P-01 · Migración a cuenta corporativa Google
-**Estado:** pendiente confirmación.
+### P-26 · Cambiar la API Key débil de producción (SEGURIDAD)
+**Estado:** abierto. Bloqueante antes de entregar el endpoint al equipo del ERP.
 
-Hoy el desarrollo va con `andresrsalamanca@gmail.com` (cuenta personal, 15 GB, sin Shared Drives). Antes de producción hay que migrar a una cuenta corporativa de Lion Capital.
+La API Key actual de producción (`LionCapital123`) es **adivinable** (nombre empresa + 123). No protege realmente el endpoint.
 
-- Candidato: `sistemas@lioncapitalg.com` (cuenta del jefe, posiblemente Google Workspace real).
-- Descartado por ahora: `aroncancio@lioncapitalg.com` parece ser Microsoft 365 (la plantilla original venía de SharePoint).
+**Acción:**
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+# editar API_KEY=<la_nueva> en /home/n8n/informes-financieros/.env
+docker compose up -d   # recargar
+```
+Guardar la clave en gestor de contraseñas, entregarla al ERP por canal seguro. Actualizar el header `X-API-Key` en el workflow de n8n con la nueva clave.
 
-**Tareas cuando se resuelva:**
-1. Verificar si la cuenta destino es Workspace real (test en accounts.google.com).
-2. Crear nuevo proyecto GCP + Service Account (preferible) o OAuth client.
-3. Si Workspace: crear **Shared Drive** corporativa, mover plantilla, dar permiso a la service account.
-4. Copiar plantilla a la propiedad corporativa.
-5. Actualizar `SLIDES_TEMPLATE_ID` y mecanismo de credenciales en `.env`.
-6. Reejecutar tests para validar.
+> El servicio funciona técnicamente con clave débil; esto es estrictamente seguridad. No bloquea desarrollo, sí bloquea "entregar a producción de verdad".
 
-**Bloqueante para:** despliegue real en producción (no para seguir desarrollando en local).
+---
 
-**Caso borde mientras tanto:** la app OAuth está en modo "Testing" en GCP. Los `refresh_token` caducan cada 7 días en ese modo. Mientras sigamos con cuenta personal, hay que regenerar `credentials/token.json` semanalmente. Migrar a Service Account + Shared Drive lo resuelve definitivamente.
+### P-01 · Migración a cuenta corporativa Google — ✅ CERRADO (2026-05-18)
+
+**RESUELTO.** `sistemas@lioncapitalg.com` resultó ser Google Workspace real. Se migró a **Service Account + Shared Drive corporativa** (mejor que OAuth: el token NO caduca). Servicio desplegado y validado en el servidor de producción, end-to-end desde curl y n8n.
+
+Detalle completo en la sección ✅ Hecho → "Migración a producción". Rollback OAuth documentado en `.env` y en memoria. Lo único que queda relacionado con producción: **P-26** (cambiar la API Key débil).
 
 ---
 

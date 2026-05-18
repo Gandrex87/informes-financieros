@@ -772,6 +772,8 @@ def build_payload_slide_2(
         "mes_año": format_mes_anyo(anyo, mes),
         "mes_año_upper": format_mes_anyo_upper(anyo, mes),
         "mes_anterior_short": format_mes_short_anyo(anyo_prev, mes_prev),
+        # Mes anterior capitalizado sin año, para textos "vs Marzo" del slide 2.
+        "mes_anterior_capitalizado": format_mes_capitalizado(mes_prev),
         "mes_año_anterior_short": format_mes_short_anyo(anyo_yoy, mes_yoy),
 
         # Slide 1 - portada
