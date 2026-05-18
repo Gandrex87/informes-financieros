@@ -90,7 +90,11 @@ def _copy_template(drive, template_id: str, new_name: str, folder_id: str) -> st
     body = {"name": new_name}
     if folder_id:
         body["parents"] = [folder_id]
-    copied = drive.files().copy(fileId=template_id, body=body).execute()
+    # supportsAllDrives=True es OBLIGATORIO para operar dentro de Shared Drives
+    # (Service Account). Inofensivo con OAuth en Mi unidad.
+    copied = drive.files().copy(
+        fileId=template_id, body=body, supportsAllDrives=True,
+    ).execute()
     return copied["id"]
 
 
@@ -135,7 +139,9 @@ def _export_pdf_bytes(drive, presentation_id: str) -> bytes:
 
 
 def _cleanup_copy(drive, presentation_id: str) -> None:
-    drive.files().delete(fileId=presentation_id).execute()
+    drive.files().delete(
+        fileId=presentation_id, supportsAllDrives=True,
+    ).execute()
 
 
 def generate_report(

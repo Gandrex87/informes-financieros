@@ -14,6 +14,7 @@ de cuenta personal.
 """
 import io
 import logging
+import os
 import time
 
 import urllib.request
@@ -42,15 +43,20 @@ def upload_temp_image(drive, image_bytes: bytes, name: str) -> str:
     "image not publicly accessible".
     """
     metadata = {"name": name, "mimeType": "image/png"}
+    folder_id = os.environ.get("DRIVE_FOLDER_ID", "").strip()
+    if folder_id:
+        metadata["parents"] = [folder_id]
     media = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype="image/png")
     file = drive.files().create(
         body=metadata, media_body=media, fields="id",
+        supportsAllDrives=True,
     ).execute()
     file_id = file["id"]
 
     drive.permissions().create(
         fileId=file_id,
         body={"role": "reader", "type": "anyone"},
+        supportsAllDrives=True,
     ).execute()
     logger.info("Imagen temporal subida: %s", file_id)
 
@@ -135,7 +141,7 @@ def replace_shape_with_image(
 def delete_drive_file(drive, file_id: str) -> None:
     """Borra un fichero de Drive (best effort, no levanta si falla)."""
     try:
-        drive.files().delete(fileId=file_id).execute()
+        drive.files().delete(fileId=file_id, supportsAllDrives=True).execute()
         logger.info("Imagen temporal borrada de Drive: %s", file_id)
     except Exception as e:
         logger.warning("No se pudo borrar %s: %s", file_id, e)

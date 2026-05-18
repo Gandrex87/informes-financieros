@@ -32,6 +32,7 @@ def main() -> int:
         meta = drive.files().get(
             fileId=template_id,
             fields="id,name,mimeType,owners(emailAddress),modifiedTime",
+            supportsAllDrives=True,
         ).execute()
     except HttpError as e:
         print(f"  ERROR de Drive API: {e}")
