@@ -108,7 +108,16 @@ Cuatro tarjetas con los KPIs del mes y sus comparativas.
 | `n_ops_reservas` | VC | `COUNT(*) WHERE fecha_senal en el mes` | ✅ |
 | `delta_ops_reservas` | derivado | `n_ops_actual - n_ops_mes-1` (formato `±N ops`) | ✅ |
 | `reservas_mes_anterior` | VC | mismo SUM que `reservas_totales` pero mes-1 | ⚠️ |
-| `reservas_año_anterior` | CM | `pagas_señales` del año anterior, mismo mes | ⚠️ ver P-18 |
+| `reservas_año_anterior` | CM | `_query_contable` con período YoY (mismo mes, año−1) → `contabilidad_mensual.pagas_señales`. **El valor es correcto** (año anterior). | ⚠️ ver P-18 |
+
+> **Bug de plantilla card 1 (etiqueta vs valor):** la card 1 emparejaba
+> `{{mes_anterior_short}}` (= mes−1, ej. `Mar '26`) con `{{reservas_año_anterior}}`
+> (= año−1, ej. `359.135 €`): la etiqueta era del mes anterior pero el valor del
+> año anterior. El token de etiqueta correcto **ya lo emite el calculator**:
+> `mes_año_anterior_short` (`format_mes_short_anyo(anyo_yoy, mes_yoy)` →
+> `Abr '25`). Fix = en la plantilla de producción, cambiar en esa línea
+> `{{mes_anterior_short}}` por `{{mes_año_anterior_short}}`. NO requiere tocar
+> Python. Aplica igual a la card 2 con `{{contratos_año_anterior}}`.
 
 ### Tarjeta · Contratos firmados (ventas y alquiler)
 
@@ -130,7 +139,7 @@ Cuatro tarjetas con los KPIs del mes y sus comparativas.
 | `ingresos_ventas` | CM | `honorarios_intermediacion` | ✅ |
 | `ingresos_alquiler` | CM | `resto_ingresos` (confirmado: lo que no es intermediación = alquileres) | ✅ |
 | `ingresos_mes_anterior` | CM | `ingresos_contables` del mes-1 | ✅ |
-| `margen_bruto` | CM | `rentabilidad_bruta_pct` formateado como `%` | ✅ |
+| `margen_bruto` | CM | **`rentabilidad_bruta_pct`** (decimal 0..1, ej. `0.6116` → `61 %`). ⚠️ NO confundir con la columna homónima `contabilidad_mensual.margen_bruto`, que es un IMPORTE en € (ej. `258.999,10`), no un %. El token usa el `_pct`. | ✅ |
 
 ### Tarjeta · Rentabilidad operativa
 
@@ -258,12 +267,26 @@ Filtro base de todos los queries de alquileres: `inmueble LIKE 'ALQ.-%'`.
 
 ### Tarjeta · Contratos firmados
 
+Filtro común de los 4 tokens (un contrato de alquiler firmado en el mes pedido):
+
+```sql
+FROM ventas_comerciales
+WHERE inmueble LIKE 'ALQ.-%'                              -- es alquiler
+  AND fecha_arras >= make_date(anyo, mes, 1)              -- fecha firma contrato
+  AND fecha_arras <  make_date(anyo, mes, 1) + INTERVAL '1 month'
+  AND arras_firmadas = 'SI'                               -- contrato efectivamente firmado
+```
+
+Recordatorio: en alquileres `fecha_arras` = **fecha de firma del contrato** (la
+ingesta mapea ahí "FECHA CONTRATO"). `arras_firmadas = 'SI'` excluye `'NO'` y
+`'CAÍDA - 0'` (canceladas).
+
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `contratos_alquiler` | VC | `SUM(honorarios_totales) WHERE alquiler AND fecha_arras en el mes AND arras_firmadas='SI'` | ✅ |
-| `var_contratos_alquiler_mom` | derivado | con flecha `▲`/`▼` | ✅ |
-| `n_ops_contratos_alquiler` | VC | `COUNT(*)` con mismo filtro que `contratos_alquiler` | ✅ |
-| `delta_ops_contratos_alquiler` | derivado | con sufijo `ops.` | ✅ |
+| `contratos_alquiler` | VC | `SUM(honorarios_totales)` con el filtro de arriba | ✅ |
+| `var_contratos_alquiler_mom` | derivado | `(contratos_alq_actual - contratos_alq_mes-1) / contratos_alq_mes-1` con flecha `▲`/`▼` | ✅ |
+| `n_ops_contratos_alquiler` | VC | `COUNT(*)` con el filtro de arriba (= nº contratos firmados en el mes) | ✅ |
+| `delta_ops_contratos_alquiler` | derivado | `n_ops_contratos_alq(mes) - n_ops_contratos_alq(mes-1)`, formateado con signo y sufijo `ops.` (ej. `+2 ops.`) | ✅ |
 
 ### Pipeline pendiente de firma (lista variable)
 
@@ -404,16 +427,22 @@ CREATE TABLE informes_financieros.promociones_obra_nueva (
 
 Y el calculator lee la tabla y construye el `CASE WHEN` dinámicamente.
 
-### Discrepancia conocida
+### Discrepancia obra nueva — RESUELTA (P-20 cerrado, 2026-05-19)
 
-Los totales del calculator no coinciden exactamente con el PDF original de abril 2026:
+Validación contra PDF original abril 2026:
 - Obra nueva Victoria Kent: calculator `94.240 €` vs PDF `94.240 €` ✅
-- Obra nueva Altos Sta Bárbara: calculator `587.450 €` vs PDF `505.850 €` ⚠️
+- Obra nueva Altos Sta Bárbara: calculator `587.450 €` ✅
 
-La diferencia de Santa Bárbara (~82k €) está pendiente de validar con
-contabilidad. Los datos en BD están correctos según el cliente, pero no
-sabemos qué subconjunto contemplaba el PDF original. Ver P-20 en
-`PENDIENTES.md`.
+La query de obra nueva es correcta. El desfase histórico (`587.450` vs
+`505.850`) **no era un bug de filtro**: se debía a **operaciones ausentes en
+`ventas_comerciales`** por una ingesta incompleta desde el Sheet (mismo patrón
+que el incidente de etiquetas contables). Una vez completados los datos en
+origen, el total cuadra. Cerrado P-20.
+
+**Lección (recurrente):** cuando un total de `ventas_comerciales` no cuadra con
+el original y la query está bien, sospechar **datos faltantes en la ingesta**
+antes que del código. Verificar con un `SELECT` de los inmuebles esperados
+(ver incidente análogo en slide 6 abajo).
 
 ---
 
@@ -457,6 +486,27 @@ ORDER BY honorarios_totales DESC
 |---|---|---|---|
 | `operaciones_condicionadas` (lista) | VC | items `{nombre, importe}` con N filas | ✅ |
 
+### Incidente: operaciones condicionadas ausentes (2026-05-19)
+
+`volumen_riesgo` salía más bajo que el PDF original. Causa: faltaban en
+`ventas_comerciales` dos operaciones condicionadas reales — **`Paseo Alameda 41`**
+(honorarios `37.500 €`) y **`C. Doctor Villena 20`** (`13.650 €`) — por ingesta
+incompleta desde el Sheet. La query (`pendiente_fecha_condicionada = TRUE`)
+estaba bien; el dato no estaba en origen. Tras corregir, `volumen_riesgo` pasó
+de `96.471,69 €` a **`147.621,69 €`** (9 operaciones) → severidad `Crítico` (rojo).
+
+**Las 2 filas se insertaron/corrigieron MANUALMENTE en Postgres** (`numero` 324
+y 325, `id` 70411/70412), saltándose la ingesta n8n. **Riesgo abierto:** si esas
+operaciones aparecen luego en el Sheet origen y la ingesta vuelve a correr,
+puede haber duplicado o sobreescritura según cómo deduplique el workflow (¿UPSERT
+por `numero` o INSERT ciego?). Seguimiento en **P-28** de `PENDIENTES.md`.
+
+**Diagnóstico estándar** cuando un total de condicionadas/ventas no cuadra:
+`SELECT` directo de los inmuebles esperados en `ventas_comerciales`
+(comprobando `pendiente_fecha_condicionada` y `honorarios_totales`) **antes** de
+sospechar del código. Mismo patrón que slide 5 (obra nueva) y el incidente de
+etiquetas contables.
+
 ---
 
 ## Slide 11 — Semáforo estratégico
@@ -487,15 +537,31 @@ el sentido.
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `var_reservas_mom_observacion` | derivado | Mismo valor que `var_reservas_mom` del slide 2, token distinto para color independiente | ✅ |
-| `var_contratos_mom_observacion` | derivado | Mismo valor que `var_contratos_mom` del slide 2, token distinto para color independiente | ✅ |
+| `var_reservas_mom_observacion` | derivado | Mismo valor visible que `var_reservas_mom` del slide 2 + sufijo `​` invisible (ver nota abajo) | ✅ |
+| `var_contratos_mom_observacion` | derivado | Mismo valor visible que `var_contratos_mom` del slide 2 + sufijo `​` invisible | ✅ |
 | `rentabilidad_op_signed` | CM | `format_pct_signed(rentabilidad_operativa_pct)` — siempre con `+`/`-` explícito | ✅ |
 | `volumen_riesgo_short` | derivado | `format_euro_compacto(volumen_riesgo)` — formato `135,9 k €` (sufijo k/M) | ✅ |
 | `mes_siguiente_capitalizado` | derivado | Nombre del mes siguiente capitalizado (`Mayo`, `Junio`...). Usado en la narrativa "facturación de X será severo" | ✅ |
 
-**Por qué tokens `_observacion` separados:**
+**Por qué tokens `_observacion` separados Y con sufijo invisible:**
 
-El mecanismo de colores busca shapes por texto del valor. Si `var_reservas_mom` con valor `-6,6 %` apareciera en slide 2 (color rojo por negativo) y slide 11 (color amarillo en columna observación), no se podrían distinguir. Tokens separados con el mismo valor pero distinto nombre resuelven el conflicto.
+El mecanismo de colores (`apply_color_overrides`) busca shapes **por el VALOR de
+texto, no por el nombre del token**. Tener un token distinto NO basta: si
+`var_reservas_mom` (slide 2, rojo por negativo) y `var_reservas_mom_observacion`
+(slide 11, amarillo) tienen el **mismo texto** `-13,9 %`, la búsqueda encuentra
+el valor en AMBOS slides y, como `_observacion` se procesa después, el amarillo
+pisaba la card 1 del slide 2.
+
+**Incidente real (2026-05-19, en producción):** slide 2 card 1 mostraba
+`-13,9 % vs Mar '26` en **amarillo** en vez de rojo. Confirmado por logs:
+`var_reservas_mom_observacion` reportaba 3 localizaciones (debía ser 1, solo el
+slide 11) → contaminaba el slide 2.
+
+**Fix aplicado:** los valores `_observacion` llevan un sufijo `​`
+(zero-width space, invisible) — `format_pct_signed(...) + "​"`. El texto se
+ve idéntico pero es **distinto** para la búsqueda, así el override del slide 11
+ya no toca las cajas del slide 2. Tras el fix: cada `_observacion` reporta 1 sola
+localización. No tocar ese sufijo al editar `calculator.py`.
 
 ### Colores condicionales del slide 11
 
@@ -521,7 +587,7 @@ tokens son **reutilizados** de slides anteriores (el calculator ya los emite).
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `total_pendiente_cobro` | constante provisional | `"204.392 €"` hardcoded en `TOTAL_PENDIENTE_COBRO_PROVISIONAL`. La fuente real está en slide 7, bloqueado por dependencia de datos externos. | ⏳ provisional |
+| `total_pendiente_cobro` | derivado (pago_agentes) | **Ya NO es provisional.** `SUM` de los cobros pendientes del slide 7 (`informes_financieros.pago_agentes`, mismo filtro: `pte_facturar` numérico puro y `> 1`), formateado con `€`. El slide 7 emite el mismo número sin `€` (`total_pendiente_cobro_sin_euro`). | ✅ |
 | `trimestre` | derivado | (ver slide 5) — usado en "Objetivo: Maximizar liquidez en Q2" | ✅ |
 
 **Tarjeta 2 — Blindaje de operaciones:**
@@ -562,9 +628,12 @@ mover a su fuente real:
 
 ```python
 OBJETIVO_RENTABILIDAD = "20 %"  # corporativo, no varía a corto plazo
-INVERSION_TECNOLOGICA_PROVISIONAL = "27k€"  # pendiente contabilidad
-TOTAL_PENDIENTE_COBRO_PROVISIONAL = "204.392 €"  # pendiente fuente slide 7
+INVERSION_TECNOLOGICA_PROVISIONAL = "27k€"  # pendiente contabilidad (¿anual? ¿acumulado?)
 ```
+
+`total_pendiente_cobro` **ya no es constante**: deriva de `pago_agentes`
+(igual que slide 7). Ya no existe `TOTAL_PENDIENTE_COBRO_PROVISIONAL` en el
+código.
 
 Buscar `PROVISIONAL` en el código localiza los puntos a actualizar cuando se
 confirme la fuente real.

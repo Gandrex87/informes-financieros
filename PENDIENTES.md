@@ -16,7 +16,9 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 
 - **Sprint 13** ✅: token `mes_anterior_capitalizado` (slide 2 "vs Marzo" dinámico). Incidente P-27 resuelto (ingesta cargaba NULL por cambio de etiquetas en el Sheet).
 
-Próximos pasos: slides 8 y 10 (Break Even). Slide 9 Parte C pendiente fuente. Cambiar API Key débil de producción (P-26). Decisión P-25 (cobros que no caben). Endurecer ingesta ante NULL (P-27). Validar P-18, P-20..P-24 con contabilidad.
+- **Sprint 14** ✅: debug slide por slide (2→12) + extracción `calculator_base.py`. Fix color slide 2 card 1 (bug producción: `_observacion` pintaba el slide 2 en amarillo → sufijo `​`). P-20 cerrado (desfase obra nueva = datos faltantes en ingesta, no bug). Datos faltantes de condicionadas insertados a mano → P-28 abierto. MAPEO_DATOS actualizado.
+
+Próximos pasos: slides 8 y 10 (Break Even). Slide 9 Parte C pendiente fuente. Cambiar API Key débil de producción (P-26). Decisión P-25 (cobros que no caben). Endurecer ingesta ante NULL (P-27). Confirmar comportamiento ingesta vs filas manuales (P-28). Bug etiqueta plantilla slide 2 card 1 (`{{mes_anterior_short}}`→`{{mes_año_anterior_short}}`). Validar P-18, P-21..P-24 con contabilidad.
 
 ---
 
@@ -151,7 +153,43 @@ LOCAL (dev, AUTH_METHOD=service_account igual que prod)
 
 **Estado:** incidente resuelto (ingesta corregida, datos recargados). El patrón de fragilidad queda anotado para endurecer la ingesta más adelante.
 
+### P-28 · Filas insertadas/corregidas a mano en `ventas_comerciales` (riesgo de divergencia con la ingesta)
 
+**Contexto (2026-05-19):** durante el debug del slide 6 faltaban en
+`ventas_comerciales` dos operaciones condicionadas reales por ingesta
+incompleta desde el Sheet. Se **insertaron y corrigieron MANUALMENTE** vía SQL
+directo a Postgres de producción (saltándose el workflow n8n):
+
+| numero | id | inmueble | honorarios_totales | pendiente_fecha_condicionada |
+|---|---|---|---|---|
+| 324 | 70411 | Paseo Alameda 41 | 37.500,00 € | TRUE |
+| 325 | 70412 | C. Doctor Villena 20 | 13.650,00 € | TRUE |
+
+Efecto: `volumen_riesgo` (slide 6) pasó de `96.471,69 €` a `147.621,69 €`
+(9 ops, severidad Crítico). Mismo patrón de causa que P-20 y P-27.
+
+**Riesgo abierto:** un INSERT/UPDATE manual mete filas que la ingesta n8n no
+conoce. Si esas 2 operaciones aparecen luego en el **Sheet origen** y la
+ingesta vuelve a correr, puede producirse:
+- **Duplicado** (si el workflow hace INSERT ciego, no UPSERT por `numero`), o
+- **Sobreescritura** de la corrección manual con datos parciales del Sheet.
+
+`numero` es UNIQUE en la tabla → un INSERT con `numero` repetido fallaría, pero
+hay que confirmar cómo se comporta exactamente el workflow.
+
+**Acciones:**
+1. Confirmar con quien gestiona la ingesta si `Paseo Alameda 41` y
+   `C. Doctor Villena 20` están en el Sheet origen y se cargarán en el próximo
+   ciclo. Si están, asegurar que el workflow deduplica por `numero` (UPSERT) y
+   no duplica/pisa estas filas.
+2. Si NO están en el Sheet: registrar que estas 2 filas son **solo manuales**
+   (riesgo de perderse si se recarga la tabla desde cero).
+3. A futuro: el origen de verdad debe ser el Sheet+ingesta, no parches SQL
+   manuales. Vigilar el patrón recurrente (P-20, P-27, P-28) de datos
+   faltantes/desfasados por ingesta.
+
+**Estado:** abierto — seguimiento de divergencia, depende de confirmar el
+comportamiento del workflow n8n.
 
 ### P-25 · Slide 7 — más cobros que slots en la plantilla (DECISIÓN DE NEGOCIO)
 
@@ -204,19 +242,18 @@ Hoy hardcoded como `"27k€"` (`INVERSION_TECNOLOGICA_PROVISIONAL`) en `calculat
 
 **Acción:** preguntar a contabilidad de dónde sale el `27k€` del PDF de abril 2026 y qué semántica tiene. Según respuesta, ajustar `calculator.py`.
 
-### P-20 · Diferencia importe obra nueva "Altos de Santa Bárbara"
+### P-20 · Diferencia importe obra nueva "Altos de Santa Bárbara" — ✅ CERRADO (2026-05-19)
 
-Calculator devuelve **587.450 €** para la promoción `Urb. Altos de Santa Bárbara` en slide 5 (21 operaciones agregadas). El PDF original de abril 2026 mostraba **505.850 €**. Diferencia ~82k €.
+**RESUELTO.** No era un bug de filtro: `_query_obra_nueva()` es correcta. El
+desfase (`587.450 €` calculator vs `505.850 €` PDF original para `Urb. Altos de
+Santa Bárbara`) se debía a **operaciones ausentes en `ventas_comerciales`** por
+ingesta incompleta desde el Sheet (mismo patrón que P-27 etiquetas y el
+incidente de condicionadas P-28). Completados los datos en origen, el total
+cuadra. `C. VICTORIA KENT` siempre cuadró (94.240 €).
 
-La promoción `C. VICTORIA KENT` cuadra exactamente (94.240 €).
-
-**Datos en BD confirmados correctos** según validación con el cliente.
-
-**Hipótesis:**
-- El PDF original podría haber filtrado por un subconjunto (ej. solo las firmadas en el mes en curso, solo las cobradas, etc.) que aún no contemplamos en el calculator.
-- O el cuadro manual original tenía operaciones desactualizadas.
-
-**Acción:** preguntar a contabilidad qué criterio aplica para el "total acumulado" de cada promoción de obra nueva en el slide 5. Cuando se aclare, ajustar el filtro en `_query_obra_nueva()`.
+**Lección:** cuando un total de `ventas_comerciales` no cuadra y la query está
+validada, sospechar **datos faltantes en la ingesta** antes que del código.
+Verificar con `SELECT` de los inmuebles esperados.
 
 ---
 
@@ -451,7 +488,7 @@ Orden sugerido (cada uno desbloquea o aporta valor visible):
 
 1. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
 2. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
-3. **P-18, P-20, P-21** — validar discrepancias y constantes provisionales con contabilidad (acción externa, en paralelo).
+3. **P-18, P-21** — validar discrepancias y constantes provisionales con contabilidad (acción externa, en paralelo). *(P-20 ya cerrado.)*
 4. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
 5. **P-12** — comando de validación de tokens (productividad, opcional).
 6. **Calculator slide 9** — comisiones con atrasos (complejo: multi-fuente).
