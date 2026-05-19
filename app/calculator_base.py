@@ -70,6 +70,32 @@ class ContableMes:
     rentabilidad_operativa_pct: Decimal | None
 
 
+@dataclass
+class ContratosResumenMes:
+    """Contratos firmados de un mes desde las tablas resumen mensual.
+
+    Suma ventas (resumen_mensual_arras) + alquileres
+    (resumen_mensual_alquileres) para un (anio, mes). Es la fuente del
+    token contratos_firmados (slide 1 y 2) y derivados.
+    """
+    honorarios: Decimal | None
+    num_operaciones: int
+
+
+@dataclass
+class BreakEvenMes:
+    """Umbrales de break even y objetivos de margen (slide 8).
+
+    Desde contabilidad_mensual. Variante SIN extras (break_even,
+    ingresos_margen_N); las columnas *_con_extras no se usan en el slide 8.
+    """
+    break_even: Decimal | None
+    ingresos_margen_10: Decimal | None
+    ingresos_margen_20: Decimal | None
+    ingresos_margen_30: Decimal | None
+    ingresos_margen_40: Decimal | None
+
+
 # ----- Helpers puros -----
 
 def _mes_anterior(anyo: int, mes: int) -> tuple[int, int]:
@@ -195,6 +221,37 @@ def _query_contable(sede: str, escenario: str, anyo: int, mes: int) -> ContableM
     )
 
 
+def _query_break_even(sede: str, escenario: str, anyo: int, mes: int) -> BreakEvenMes | None:
+    """Lee los umbrales de break even de un mes (slide 8).
+
+    Variante SIN extras (decision de contabilidad). Devuelve None si no hay
+    fila contable para ese (sede, escenario, anyo, mes).
+    """
+    schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
+    sql = f"""
+        SELECT break_even,
+               ingresos_margen_10, ingresos_margen_20,
+               ingresos_margen_30, ingresos_margen_40
+        FROM {schema}.contabilidad_mensual
+        WHERE sede = %(sede)s AND escenario = %(escenario)s
+          AND anyo = %(anyo)s AND mes = %(mes)s;
+    """
+    with connection() as conn:
+        cur = conn.execute(sql, {
+            "sede": sede, "escenario": escenario, "anyo": anyo, "mes": mes,
+        })
+        row = cur.fetchone()
+    if not row:
+        return None
+    return BreakEvenMes(
+        break_even=row["break_even"],
+        ingresos_margen_10=row["ingresos_margen_10"],
+        ingresos_margen_20=row["ingresos_margen_20"],
+        ingresos_margen_30=row["ingresos_margen_30"],
+        ingresos_margen_40=row["ingresos_margen_40"],
+    )
+
+
 def _query_arras_cobradas_mes(anyo: int, mes: int) -> Decimal | None:
     """Lee resumen_mensual_arras__sin_condicion.cobradas para un mes.
 
@@ -233,6 +290,55 @@ def _query_alquileres_cobrados_mes(anyo: int, mes: int) -> Decimal | None:
         cur = conn.execute(sql, {"anyo": anyo, "mes_label": mes_label})
         row = cur.fetchone()
     return row["honorarios_cobrados"] if row else None
+
+
+def _query_contratos_resumen(anyo: int, mes: int) -> ContratosResumenMes:
+    """Contratos firmados de un mes = ventas + alquileres (tablas resumen).
+
+    Suma:
+    - resumen_mensual_arras.honorarios + num_operaciones (ventas)
+    - resumen_mensual_alquileres.honorarios_cobrados + num_operaciones (alq.)
+
+    Fuente del token contratos_firmados (slide 1 y 2) y derivados
+    (var MoM/YoY, ticket medio, gráfico slide 3). Filtro anio + mes
+    (string 3 letras). resumen_mensual_arras tiene 2025 y 2026.
+
+    OJO septiembre: resumen_mensual_alquileres usa 'sept' (4 letras),
+    resumen_mensual_arras usa 'sep' (3 letras). Se resuelve por tabla.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    label_3 = _MES_LABEL_3[mes]
+    label_alq = "sept" if mes == 9 else label_3
+    with connection() as conn:
+        ar = conn.execute(
+            f"""
+            SELECT honorarios, num_operaciones
+            FROM {schema}.resumen_mensual_arras
+            WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+            """,
+            {"anyo": anyo, "mes_label": label_3},
+        ).fetchone()
+        al = conn.execute(
+            f"""
+            SELECT honorarios_cobrados, num_operaciones
+            FROM {schema}.resumen_mensual_alquileres
+            WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+            """,
+            {"anyo": anyo, "mes_label": label_alq},
+        ).fetchone()
+
+    ar_hon = ar["honorarios"] if ar and ar["honorarios"] is not None else None
+    al_hon = al["honorarios_cobrados"] if al and al["honorarios_cobrados"] is not None else None
+    if ar_hon is None and al_hon is None:
+        honorarios = None
+    else:
+        honorarios = (ar_hon or Decimal(0)) + (al_hon or Decimal(0))
+
+    n_ops = (
+        (ar["num_operaciones"] if ar and ar["num_operaciones"] else 0)
+        + (al["num_operaciones"] if al and al["num_operaciones"] else 0)
+    )
+    return ContratosResumenMes(honorarios=honorarios, num_operaciones=n_ops)
 
 
 def _query_cobros_pendientes() -> list[dict]:

@@ -94,17 +94,21 @@ from app.db import connection
 from app.calculator_base import (
     _MES_LABEL_3,
     AlquilerMes,
+    BreakEvenMes,
     ComercialMes,
     ContableMes,
+    ContratosResumenMes,
     _clasifica_impacto,
     _limpia_inmueble_alq,
     _mes_anterior,
     _mes_siguiente,
     _query_arras_cobradas_mes,
     _query_alquileres_cobrados_mes,
+    _query_break_even,
     _query_cobros_pendientes,
     _query_comercial,
     _query_contable,
+    _query_contratos_resumen,
     _variacion,
 )
 from app.formatter import (
@@ -154,6 +158,44 @@ SUBTOTAL_COMISION_ATRASOS_PROVISIONAL = Decimal("1021.89")
 # (total_pendiente_cobro ya NO es provisional: deriva de pago_agentes,
 #  igual que slide 7).
 INVERSION_TECNOLOGICA_PROVISIONAL = "27k€"  # pendiente origen (¿constante anual? ¿acumulado?)
+
+
+def _narrativa_break_even(
+    ingresos: Decimal | None,
+    break_even: Decimal | None,
+    margen_seguridad: Decimal | None,
+) -> str:
+    """Genera el texto de analisis del slide 8 (templating determinista).
+
+    Decision de diseño del proyecto: narrativa por plantilla en Python, NO
+    LLM (la consistencia importa mas que la variedad en un documento
+    financiero). Tres ramas segun la relacion facturacion/break even.
+    """
+    if ingresos is None or break_even is None or margen_seguridad is None:
+        return ""
+    fact = format_euro(ingresos)
+    be = format_euro(break_even)
+    if margen_seguridad > 0:
+        ms = format_euro(margen_seguridad)
+        return (
+            f"La facturación cobrada ({fact}) supera el punto de equilibrio "
+            f"({be}), con un margen de seguridad de {ms}. La operación es "
+            f"rentable este mes; el excedente sobre el break even amortigua "
+            f"posibles desviaciones."
+        )
+    if margen_seguridad == 0:
+        return (
+            f"La facturación cobrada ({fact}) iguala exactamente el punto de "
+            f"equilibrio ({be}). No hay margen de seguridad: cualquier "
+            f"desviación negativa llevaría el mes a pérdidas."
+        )
+    deficit = format_euro(-margen_seguridad)
+    return (
+        f"La facturación cobrada ({fact}) NO alcanza el punto de equilibrio "
+        f"({be}); faltan {deficit} para cubrir la estructura de costes. El "
+        f"mes cierra por debajo del break even."
+    )
+
 
 def _query_alquileres_mes(anyo: int, mes: int) -> AlquilerMes:
     """Lee de ventas_comerciales el resumen de alquileres de un mes.
@@ -346,6 +388,12 @@ def build_payload_slide_2(
     cont_prev = _query_contable(sede, escenario, anyo_prev, mes_prev)
     cont_yoy = _query_contable(sede, escenario, anyo_yoy, mes_yoy)
 
+    # Contratos firmados (slide 1/2 y derivados): suma de las tablas
+    # resumen mensual (ventas + alquileres), NO ventas_comerciales.
+    contr_actual = _query_contratos_resumen(anyo, mes)
+    contr_prev = _query_contratos_resumen(anyo_prev, mes_prev)
+    contr_yoy = _query_contratos_resumen(anyo_yoy, mes_yoy)
+
     # Slide 4: alquileres
     alq_actual = _query_alquileres_mes(anyo, mes)
     alq_prev = _query_alquileres_mes(anyo_prev, mes_prev)
@@ -365,6 +413,13 @@ def build_payload_slide_2(
     arras_cobradas = _query_arras_cobradas_mes(anyo, mes)
     alq_cobrados = _query_alquileres_cobrados_mes(anyo, mes)
 
+    # Slide 8: break even del mes (variante sin extras, mismo escenario)
+    break_even_mes = _query_break_even(sede, escenario, anyo, mes)
+
+    # Slide 10: break even PROYECTADO del mes siguiente (misma tabla/escenario,
+    # fila del mes+1 ya cargada en contabilidad_mensual).
+    break_even_proy = _query_break_even(sede, escenario, anyo_next, mes_next)
+
     if cont_actual is None:
         raise ValueError(
             f"No hay datos contables para sede={sede} escenario={escenario} "
@@ -372,8 +427,10 @@ def build_payload_slide_2(
         )
 
     # --- Variaciones MoM ---
+    # Contratos: fuente = tablas resumen mensual (contr_*), no
+    # ventas_comerciales. Reservas/ingresos/rentab siguen igual.
     var_reservas_mom = _variacion(com_actual.señales_total, com_prev.señales_total)
-    var_contratos_mom = _variacion(com_actual.arras_total, com_prev.arras_total)
+    var_contratos_mom = _variacion(contr_actual.honorarios, contr_prev.honorarios)
     var_ingresos_mom = _variacion(
         cont_actual.ingresos_contables,
         cont_prev.ingresos_contables if cont_prev else None,
@@ -385,13 +442,13 @@ def build_payload_slide_2(
 
     # --- Deltas de operaciones ---
     delta_ops_reservas = com_actual.señales_n_ops - com_prev.señales_n_ops
-    delta_ops_contratos = com_actual.arras_n_ops - com_prev.arras_n_ops
+    delta_ops_contratos = contr_actual.num_operaciones - contr_prev.num_operaciones
 
     # --- Datos comparativos ---
     señales_mes_anterior = com_prev.señales_total
     señales_anyo_anterior = cont_yoy.pagas_señales if cont_yoy else None
-    arras_mes_anterior = com_prev.arras_total
-    arras_anyo_anterior = cont_yoy.arras_firmadas if cont_yoy else None
+    arras_mes_anterior = contr_prev.honorarios
+    arras_anyo_anterior = contr_yoy.honorarios
 
     # --- Datos del grafico slide 3 (3 periodos x 2 series) ---
     # No van por replaceAllText; el generator los usa para crear el PNG.
@@ -409,14 +466,15 @@ def build_payload_slide_2(
         {
             "etiqueta": format_mes_short_anyo(anyo, mes).replace("'", " '"),
             "reservas": float(com_actual.señales_total) if com_actual.señales_total is not None else 0.0,
-            "contratos": float(com_actual.arras_total) if com_actual.arras_total is not None else 0.0,
+            "contratos": float(contr_actual.honorarios) if contr_actual.honorarios is not None else 0.0,
         },
     ]
 
     # --- Calculos especificos del slide 3 ---
-    # Variaciones YoY (comparativa interanual)
+    # Variaciones YoY (comparativa interanual). Contratos: ambos lados
+    # desde tablas resumen (contr_actual vs contr_yoy), fuente coherente.
     var_reservas_yoy = _variacion(com_actual.señales_total, señales_anyo_anterior)
-    var_contratos_yoy = _variacion(com_actual.arras_total, arras_anyo_anterior)
+    var_contratos_yoy = _variacion(contr_actual.honorarios, arras_anyo_anterior)
 
     # --- Calculos especificos del slide 4 (alquileres) ---
     var_reservas_alquiler_mom = _variacion(alq_actual.señales_total, alq_prev.señales_total)
@@ -502,13 +560,45 @@ def build_payload_slide_2(
     comision_variable_por_director = total_comision_repartir / N_DIRECTORES
     total_por_director = comision_variable_por_director + SUELDO_FIJO_DIRECTOR
 
-    # Ticket medio = contratos_firmados / n_ops_contratos
+    # --- Calculos especificos del slide 8 (Break Even y objetivos) ---
+    # ingresos_contables es la "facturacion cobrada" que se compara contra
+    # cada umbral. Estado: '✓ SUPERADO' si la facturacion alcanza el umbral,
+    # 'FALTAN: <X> €' (lo que falta) si no. Variante SIN extras.
+    ingresos_be = cont_actual.ingresos_contables
+
+    def _estado_umbral(umbral: Decimal | None) -> str:
+        if umbral is None or ingresos_be is None:
+            return ""
+        if ingresos_be >= umbral:
+            return "✓ SUPERADO"
+        return f"FALTAN: {format_euro(umbral - ingresos_be)}"
+
+    if break_even_mes is not None:
+        be_break_even = break_even_mes.break_even
+        be_m10 = break_even_mes.ingresos_margen_10
+        be_m20 = break_even_mes.ingresos_margen_20
+        be_m30 = break_even_mes.ingresos_margen_30
+        be_m40 = break_even_mes.ingresos_margen_40
+    else:
+        be_break_even = be_m10 = be_m20 = be_m30 = be_m40 = None
+
+    # Margen de seguridad = facturacion cobrada - break even.
+    # Positivo si se ha superado el punto muerto.
+    margen_seguridad = None
+    if ingresos_be is not None and be_break_even is not None:
+        margen_seguridad = ingresos_be - be_break_even
+
+    narrativa_break_even = _narrativa_break_even(
+        ingresos_be, be_break_even, margen_seguridad,
+    )
+
+    # Ticket medio = contratos_firmados / n_ops_contratos (fuente resumen)
     ticket_medio = None
-    if com_actual.arras_n_ops > 0 and com_actual.arras_total is not None:
-        ticket_medio = com_actual.arras_total / com_actual.arras_n_ops
+    if contr_actual.num_operaciones > 0 and contr_actual.honorarios is not None:
+        ticket_medio = contr_actual.honorarios / contr_actual.num_operaciones
     ticket_medio_prev = None
-    if com_prev.arras_n_ops > 0 and com_prev.arras_total is not None:
-        ticket_medio_prev = com_prev.arras_total / com_prev.arras_n_ops
+    if contr_prev.num_operaciones > 0 and contr_prev.honorarios is not None:
+        ticket_medio_prev = contr_prev.honorarios / contr_prev.num_operaciones
     var_ticket_medio_mom = _variacion(ticket_medio, ticket_medio_prev)
 
     # --- Color overrides ---
@@ -539,6 +629,12 @@ def build_payload_slide_2(
         color_overrides["var_contratos_alquiler_mom"] = "verde" if var_contratos_alquiler_mom >= 0 else "rojo"
     # Slide 6: color del volumen_riesgo segun severidad
     color_overrides["volumen_riesgo"] = impacto_color
+    # Slide 8: margen de seguridad. Verde si se cubre el break even,
+    # rojo si hay deficit (margen negativo = el mes cierra en perdidas).
+    # En plantilla esta en verde fijo; sin este override un deficit
+    # saldria en verde, comunicando lo contrario de la realidad.
+    if margen_seguridad is not None:
+        color_overrides["margen_seguridad"] = "verde" if margen_seguridad >= 0 else "rojo"
     # Slide 11: mismos criterios que slide 6 para version compacta
     color_overrides["volumen_riesgo_short"] = impacto_color
     # Slide 11: rentabilidad operativa con signo, verde si supera el objetivo
@@ -575,7 +671,7 @@ def build_payload_slide_2(
 
         # Slide 1 - portada
         "reservas_totales": format_euro(com_actual.señales_total),
-        "contratos_firmados": format_euro(com_actual.arras_total),
+        "contratos_firmados": format_euro(contr_actual.honorarios),
         "ingresos_totales": format_euro(cont_actual.ingresos_contables),
         "tramo_comision": tramo_comision,
 
@@ -588,7 +684,7 @@ def build_payload_slide_2(
 
         # Slide 2 - tarjeta Contratos firmados
         "var_contratos_mom": format_pct_signed(var_contratos_mom, decimales=2),
-        "n_ops_contratos": format_int(com_actual.arras_n_ops),
+        "n_ops_contratos": format_int(contr_actual.num_operaciones),
         "delta_ops_contratos": format_int_signed(delta_ops_contratos, suffix="ops"),
         "contratos_mes_anterior": format_euro(arras_mes_anterior),
         "contratos_año_anterior": format_euro(arras_anyo_anterior),
@@ -621,10 +717,10 @@ def build_payload_slide_2(
         ),
 
         # Tarjeta Arras y contratos (Mar26 vs Abr26)
-        "n_ops_contratos_mes_anterior": format_int(com_prev.arras_n_ops),
+        "n_ops_contratos_mes_anterior": format_int(contr_prev.num_operaciones),
         "var_contratos_mom_arrow": format_pct_with_arrow(var_contratos_mom, decimales=1),
         "delta_ops_contratos_full": format_delta_ops_full(
-            com_actual.arras_n_ops, com_prev.arras_n_ops
+            contr_actual.num_operaciones, contr_prev.num_operaciones
         ),
 
         # Tarjeta Comparativa interanual (vs ABRIL 2025)
@@ -659,6 +755,38 @@ def build_payload_slide_2(
         "cobros_pendientes": cobros_pendientes,
         "total_pendiente_cobro_sin_euro": format_numero(total_pendiente_cobro_num),
         "nota_cobros": "",  # vacia por ahora (decision tomada, como slide 4)
+
+        # --- Slide 8: Break Even y objetivos de facturación ---
+        # ingresos_totales y mes_año_upper/sede_upper ya se emiten arriba.
+        "break_even": format_euro(be_break_even),
+        "margen_10_objetivo": format_euro(be_m10),
+        "margen_20_objetivo": format_euro(be_m20),
+        "margen_30_objetivo": format_euro(be_m30),
+        "margen_40_objetivo": format_euro(be_m40),
+        "margen_seguridad": format_euro(margen_seguridad),
+        "break_even_estado": _estado_umbral(be_break_even),
+        "margen_10_estado": _estado_umbral(be_m10),
+        "margen_20_estado": _estado_umbral(be_m20),
+        "margen_30_estado": _estado_umbral(be_m30),
+        "margen_40_estado": _estado_umbral(be_m40),
+        "narrativa_break_even": narrativa_break_even,
+
+        # --- Slide 10: Break Even proyectado (mes siguiente) ---
+        # contabilidad_mensual fila mes+1, mismo escenario. Sin estados ni
+        # narrativa (la plantilla solo muestra umbrales). facturacion_objetivo
+        # = break even proyectado (decision: el minimo a facturar). El slide
+        # solo llega a margen 30% (no hay 40% proyectado).
+        "mes_siguiente_upper_solo": format_mes_upper(mes_next),
+        "break_even_proy": format_euro(
+            break_even_proy.break_even if break_even_proy else None),
+        "facturacion_objetivo_proy": format_euro(
+            break_even_proy.break_even if break_even_proy else None),
+        "margen_10_objetivo_proy": format_euro(
+            break_even_proy.ingresos_margen_10 if break_even_proy else None),
+        "margen_20_objetivo_proy": format_euro(
+            break_even_proy.ingresos_margen_20 if break_even_proy else None),
+        "margen_30_objetivo_proy": format_euro(
+            break_even_proy.ingresos_margen_30 if break_even_proy else None),
 
         # --- Slide 6: Operaciones condicionadas ---
         "operaciones_condicionadas": operaciones_condicionadas,
