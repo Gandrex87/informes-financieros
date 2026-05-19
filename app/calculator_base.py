@@ -341,6 +341,32 @@ def _query_contratos_resumen(anyo: int, mes: int) -> ContratosResumenMes:
     return ContratosResumenMes(honorarios=honorarios, num_operaciones=n_ops)
 
 
+def _query_alquiler_senales_resumen(anyo: int, mes: int) -> ContratosResumenMes:
+    """Señales de alquiler de un mes desde resumen_mensual_alquiler_senales.
+
+    Fuente de la tarjeta Reservas/Señales del slide 4 (reservas_alquiler
+    y derivados: var MoM, n_ops, delta). Filtro anio + mes (string 3
+    letras). OJO septiembre: esta tabla usa 'sept' (4 letras).
+
+    Reutiliza ContratosResumenMes (honorarios + num_operaciones).
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    mes_label = "sept" if mes == 9 else _MES_LABEL_3[mes]
+    sql = f"""
+        SELECT honorarios_cobrados, num_operaciones
+        FROM {schema}.resumen_mensual_alquiler_senales
+        WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+    """
+    with connection() as conn:
+        row = conn.execute(sql, {"anyo": anyo, "mes_label": mes_label}).fetchone()
+    if not row:
+        return ContratosResumenMes(honorarios=None, num_operaciones=0)
+    return ContratosResumenMes(
+        honorarios=row["honorarios_cobrados"],
+        num_operaciones=row["num_operaciones"] or 0,
+    )
+
+
 def _query_cobros_pendientes() -> list[dict]:
     """Cobros pendientes de liquidacion (slide 7).
 

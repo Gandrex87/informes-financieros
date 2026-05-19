@@ -104,6 +104,7 @@ from app.calculator_base import (
     _mes_siguiente,
     _query_arras_cobradas_mes,
     _query_alquileres_cobrados_mes,
+    _query_alquiler_senales_resumen,
     _query_break_even,
     _query_cobros_pendientes,
     _query_comercial,
@@ -398,6 +399,10 @@ def build_payload_slide_2(
     alq_actual = _query_alquileres_mes(anyo, mes)
     alq_prev = _query_alquileres_mes(anyo_prev, mes_prev)
     pipeline_alq_rows = _query_pipeline_alquileres()
+    # Slide 4 - tarjeta Reservas/Señales: fuente = tabla resumen
+    # resumen_mensual_alquiler_senales (NO ventas_comerciales).
+    alq_sen_actual = _query_alquiler_senales_resumen(anyo, mes)
+    alq_sen_prev = _query_alquiler_senales_resumen(anyo_prev, mes_prev)
 
     # Slide 5: pipeline Q2 (ventas + obra nueva)
     pipeline_ventas_rows = _query_pipeline_ventas()
@@ -435,10 +440,15 @@ def build_payload_slide_2(
         cont_actual.ingresos_contables,
         cont_prev.ingresos_contables if cont_prev else None,
     )
-    var_rentab_mom = _variacion(
-        cont_actual.rentabilidad_operativa_pct,
-        cont_prev.rentabilidad_operativa_pct if cont_prev else None,
-    )
+    # Rentabilidad operativa: ambos lados YA son % (fraccion 0..1). La
+    # "variacion" es la DIFERENCIA EN PUNTOS PORCENTUALES (abril - marzo),
+    # no la variacion relativa de _variacion. Ej: 0.3038 - 0.3099 = -0.0061
+    # -> format_pct_signed lo muestra como -0,61 %.
+    _rentab_prev = cont_prev.rentabilidad_operativa_pct if cont_prev else None
+    if cont_actual.rentabilidad_operativa_pct is None or _rentab_prev is None:
+        var_rentab_mom = None
+    else:
+        var_rentab_mom = cont_actual.rentabilidad_operativa_pct - _rentab_prev
 
     # --- Deltas de operaciones ---
     delta_ops_reservas = com_actual.señales_n_ops - com_prev.señales_n_ops
@@ -477,9 +487,11 @@ def build_payload_slide_2(
     var_contratos_yoy = _variacion(contr_actual.honorarios, arras_anyo_anterior)
 
     # --- Calculos especificos del slide 4 (alquileres) ---
-    var_reservas_alquiler_mom = _variacion(alq_actual.señales_total, alq_prev.señales_total)
+    # Señales: fuente resumen (alq_sen_*). Contratos alquiler: sigue
+    # ventas_comerciales (alq_*), sin cambios.
+    var_reservas_alquiler_mom = _variacion(alq_sen_actual.honorarios, alq_sen_prev.honorarios)
     var_contratos_alquiler_mom = _variacion(alq_actual.contratos_total, alq_prev.contratos_total)
-    delta_ops_reservas_alquiler = alq_actual.señales_n_ops - alq_prev.señales_n_ops
+    delta_ops_reservas_alquiler = alq_sen_actual.num_operaciones - alq_sen_prev.num_operaciones
     delta_ops_contratos_alquiler = alq_actual.contratos_n_ops - alq_prev.contratos_n_ops
 
     # Pipeline alquileres: lista para expand_lists. Prefijo de nombre con
@@ -733,10 +745,10 @@ def build_payload_slide_2(
         "var_ticket_medio_mom": format_pct_signed(var_ticket_medio_mom, decimales=1),
 
         # --- Slide 4: Gestion de alquileres ---
-        # Tarjeta Reservas (señales)
-        "reservas_alquiler": format_euro(alq_actual.señales_total),
+        # Tarjeta Reservas (señales) - fuente resumen_mensual_alquiler_senales
+        "reservas_alquiler": format_euro(alq_sen_actual.honorarios),
         "var_reservas_alquiler_mom": format_pct_with_arrow(var_reservas_alquiler_mom, decimales=2),
-        "n_ops_reservas_alquiler": format_int(alq_actual.señales_n_ops),
+        "n_ops_reservas_alquiler": format_int(alq_sen_actual.num_operaciones),
         "delta_ops_reservas_alquiler": format_int_signed(delta_ops_reservas_alquiler, suffix="op."),
 
         # Tarjeta Contratos firmados
