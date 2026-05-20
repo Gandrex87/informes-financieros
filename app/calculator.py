@@ -679,6 +679,16 @@ def build_payload_slide_2(
     return {
         "_color_overrides": color_overrides,
         "_chart_reservas_arras": chart_periodos,
+        # Valores numericos crudos para el posicionamiento dinamico del
+        # marcador {{ingresos_totales}} en la barra del slide 8. El
+        # generator lo extrae y manda updatePageElementTransform.
+        "_break_even_position": {
+            "ingresos": cont_actual.ingresos_contables,
+            "break_even": be_break_even,
+            "margen_10": be_m10,
+            "margen_20": be_m20,
+            "margen_30": be_m30,
+        },
 
         # Identificacion
         "sede": sede,

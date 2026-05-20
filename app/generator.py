@@ -13,6 +13,7 @@ from pathlib import Path
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
+from app.break_even_chart import apply_breakeven_marker_position
 from app.chart_generator import DatoPeriodo, generar_grafico_reservas_arras
 from app.color_helpers import apply_color_overrides
 from app.image_helpers import (
@@ -31,6 +32,12 @@ COLOR_OVERRIDES_KEY = "_color_overrides"
 # Clave del payload con los datos del grafico del slide 3.
 CHART_RESERVAS_ARRAS_KEY = "_chart_reservas_arras"
 CHART_RESERVAS_ARRAS_TOKEN = "{{grafico_reservas_arras}}"
+
+# Clave del payload con los valores numericos para posicionar el marcador
+# {{ingresos_totales}} en la barra del slide 8 (Break Even).
+# Estructura: dict con keys ingresos, break_even, margen_10, margen_20,
+# margen_30 (Decimal/float). Si falta o algun valor es None, no se mueve.
+BREAK_EVEN_POSITION_KEY = "_break_even_position"
 
 
 # Especificacion de listas que se expanden a slots numerados antes de
@@ -174,8 +181,9 @@ def generate_report(
     # de replaceAllText, se procesan aparte).
     color_overrides = data.get(COLOR_OVERRIDES_KEY, {}) or {}
     chart_reservas_arras = data.get(CHART_RESERVAS_ARRAS_KEY)
+    break_even_position = data.get(BREAK_EVEN_POSITION_KEY)
 
-    special_keys = {COLOR_OVERRIDES_KEY, CHART_RESERVAS_ARRAS_KEY}
+    special_keys = {COLOR_OVERRIDES_KEY, CHART_RESERVAS_ARRAS_KEY, BREAK_EVEN_POSITION_KEY}
     data_clean = {k: v for k, v in data.items() if k not in special_keys}
 
     expanded = expand_lists(data_clean, LIST_SPECS)
@@ -188,6 +196,24 @@ def generate_report(
     try:
         copy_id = _copy_template(drive_client, template_id, copy_name, folder_id)
         logger.info("Copia creada: %s (%s)", copy_name, copy_id)
+
+        # Slide 8: posicionar dinamicamente el marcador {{ingresos_totales}}
+        # en la barra de break even segun el valor real del mes. Esto va
+        # ANTES de _replace_tokens porque locate_breakeven_anchors busca los
+        # tokens {{...}} literales en la plantilla; una vez sustituidos por
+        # sus valores no se podria identificar el shape a mover.
+        if break_even_position:
+            try:
+                apply_breakeven_marker_position(
+                    slides_client, copy_id,
+                    ingresos=break_even_position.get("ingresos"),
+                    valor_break_even=break_even_position.get("break_even"),
+                    valor_margen_10=break_even_position.get("margen_10"),
+                    valor_margen_20=break_even_position.get("margen_20"),
+                    valor_margen_30=break_even_position.get("margen_30"),
+                )
+            except Exception as e:
+                logger.exception("Error posicionando marcador break even: %s", e)
 
         total, missing = _replace_tokens(slides_client, copy_id, expanded)
         logger.info("%d reemplazos efectivos.", total)

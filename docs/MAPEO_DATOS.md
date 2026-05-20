@@ -14,9 +14,19 @@ Este documento sirve a la vez como:
 |---|---|
 | **VC** | tabla `finanzas_automation.ventas_comerciales` (datos crudos, una fila por operación) |
 | **CM** | tabla `informes_financieros.contabilidad_mensual` (snapshot mensual del Sheet contable) |
+| **RM-arras** | tabla `finanzas_automation.resumen_mensual_arras` (totales mensuales de ventas, 2025+2026) |
+| **RM-alq** | tabla `finanzas_automation.resumen_mensual_alquileres` (totales mensuales de alquileres cobrados, solo 2026) |
+| **RM-alq-señales** | tabla `finanzas_automation.resumen_mensual_alquiler_senales` (señales/reservas de alquiler por mes, solo 2026) |
+| **PD** | tabla `finanzas_automation.pagos_directores` (1 fila por director y mes; alimenta el tramo de comisión dinámico) |
 | **constante** | valor hardcodeado en código (a mover a `parametros_sede_mes` cuando varíe por sede o mes) |
 | **derivado** | calculado por Python a partir de otros datos |
 | **manual** | aún no integrado; viene del cliente (n8n o JSON mock) |
+
+> **Nota sobre alquileres 2025:** las dos tablas de resumen de alquileres
+> (`resumen_mensual_alquileres`, `resumen_mensual_alquiler_senales`) solo tienen
+> filas para 2026 porque **el negocio de alquileres nació en 2026** (no existía
+> en 2025). Eso hace que el YoY de contratos (slide 3) sume solo ventas para
+> el año anterior — y es el dato correcto, no una asimetría a arreglar.
 
 **Estado:**
 - ✅ Integrado y leyendo de Postgres.
@@ -40,8 +50,11 @@ el informe de marzo 2026 en septiembre, estos datos serán **los de marzo**:
 | Concepto | Fuente | Por qué es fiable |
 |---|---|---|
 | Ingresos, márgenes, rentabilidad, break even, EBITDA | `contabilidad_mensual` | Snapshot mensual cargado del Sheet, una fila por (sede, escenario, anyo, mes) |
-| Comisiones cobradas del mes (ventas y alquileres) | `resumen_mensual_arras__sin_condicion`, `resumen_mensual_alquileres` | Tablas resumen mensual, una fila por mes |
-| Reservas / contratos del mes (importes y conteos) | `ventas_comerciales` filtrado por `fecha_senal`/`fecha_arras` en el mes | El filtro es por fecha del evento, que no cambia |
+| **Contratos firmados del mes** (importe + nº ops, slide 1/2/3) | `resumen_mensual_arras` + `resumen_mensual_alquileres` | **Cambio 2026-05-20:** ya NO se calcula desde `ventas_comerciales`; viene de la suma de las 2 tablas resumen mensual. Una fila por mes. |
+| **Señales de alquiler del mes** (importe + nº ops, slide 4 tarjeta Reservas) | `resumen_mensual_alquiler_senales` | **Cambio 2026-05-20:** ya NO desde `ventas_comerciales`; viene de tabla resumen. |
+| Comisiones cobradas del mes (ventas y alquileres, slide 9) | `resumen_mensual_arras__sin_condicion`, `resumen_mensual_alquileres` | Tablas resumen mensual, una fila por mes |
+| Reservas del mes (señales sumadas de ventas+alquileres) | `ventas_comerciales` filtrado por `fecha_senal` en el mes | El filtro es por fecha del evento, que no cambia |
+| **Tramo de comisión del mes** (slide 1 y 9) | `pagos_directores` (suma de `porcentaje` del mes) | **Cambio 2026-05-20:** ya NO es constante `0.03` hardcoded; se lee dinámicamente. |
 | Comparativas MoM / YoY | derivadas de los anteriores | Cálculo relativo al mes pedido |
 
 ### 🔴 Datos de ESTADO VIVO — reflejan la foto de HOY, NO del mes pedido
@@ -89,9 +102,9 @@ KPIs principales y identificación del informe.
 | `mes_año` | parámetro de entrada | `Abril 2026` (en español) | ✅ |
 | `mes_año_upper` | derivado | `mes_año.upper()` | ✅ |
 | `reservas_totales` | VC | `SUM(honorarios_totales) WHERE fecha_senal en el mes` | ⚠️ ver P-18 |
-| `contratos_firmados` | VC | `SUM(honorarios_totales) WHERE fecha_arras en el mes AND arras_firmadas='SI'` | ⚠️ ver P-18 |
+| `contratos_firmados` | RM-arras + RM-alq | **Suma** de `resumen_mensual_arras.honorarios` + `resumen_mensual_alquileres.honorarios_cobrados` para `(anio, mes)`. Abril 2026: 483.327 + 22.075 = **505.402 €**. Función `_query_contratos_resumen`. | ✅ |
 | `ingresos_totales` | CM | `ingresos_contables` | ✅ |
-| `tramo_comision` | constante | `"3 %"` (pendiente parametros_sede_mes) | ✅ |
+| `tramo_comision` | PD | **Dinámico:** `SUM(porcentaje)` de `pagos_directores` para `(anio, mes)`. Abril 2026: ALEX 0,015 + FADIA 0,015 = `"3 %"`. Función `_query_tramo_comision`. Funciona con N directores variables sin tocar código. Resuelve P-22. | ✅ |
 
 ---
 
@@ -123,12 +136,12 @@ Cuatro tarjetas con los KPIs del mes y sus comparativas.
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `contratos_firmados` | VC | (igual que slide 1) | ⚠️ |
-| `var_contratos_mom` | derivado | `(contratos_actual - contratos_mes-1) / contratos_mes-1` | ⚠️ |
-| `n_ops_contratos` | VC | `COUNT(*) WHERE fecha_arras en mes AND arras_firmadas='SI'` | ⚠️ |
+| `contratos_firmados` | RM-arras + RM-alq | (igual que slide 1: suma de las 2 tablas resumen del mes) | ✅ |
+| `var_contratos_mom` | derivado | `(contratos_actual - contratos_mes-1) / contratos_mes-1`, ambos lados desde RM-arras + RM-alq | ✅ |
+| `n_ops_contratos` | RM-arras + RM-alq | Suma de `num_operaciones` de ambas tablas para el mes. Abril 2026: 33+7 = 40. | ✅ |
 | `delta_ops_contratos` | derivado | `n_ops_actual - n_ops_mes-1` (formato `±N ops`) | ✅ |
-| `contratos_mes_anterior` | VC | mismo SUM que `contratos_firmados` pero mes-1 | ⚠️ |
-| `contratos_año_anterior` | CM | `arras_firmadas` del año anterior, mismo mes | ⚠️ ver P-18 |
+| `contratos_mes_anterior` | RM-arras + RM-alq | Misma suma para `(anyo_prev, mes_prev)` | ✅ |
+| `contratos_año_anterior` | RM-arras + RM-alq | Misma suma para el mismo mes del año anterior. ⚠️ Como alquileres no existía en 2025, solo suma ventas → es el dato correcto, no un error. | ✅ |
 
 ### Tarjeta · Ingresos totales
 
@@ -146,7 +159,7 @@ Cuatro tarjetas con los KPIs del mes y sus comparativas.
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
 | `rentabilidad_op` | CM | `rentabilidad_operativa_pct` | ✅ |
-| `var_rentab_mom` | derivado | `rentab_actual - rentab_mes-1` aplicado como variación porcentual | ✅ |
+| `var_rentab_mom` | derivado | **Diferencia en PUNTOS PORCENTUALES** (no variación relativa). Abril 30,38% − marzo 30,99% = `-0,61 %`. Ambos lados ya son % → resta directa, NO `(a-b)/b`. Si fuese variación relativa daría -1,97 % (engañoso). | ✅ |
 | `resultado_op` | CM | `ebitda_no_extras` | ✅ |
 | `objetivo_rentabilidad` | constante | `"20 %"` (objetivo corporativo fijo) | ✅ |
 
@@ -193,29 +206,29 @@ Mismo patrón que la tarjeta anterior, pero para `contratos_*` y filtrado por `f
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `contratos_mes_anterior` | VC | | ⚠️ |
-| `n_ops_contratos_mes_anterior` | VC | | ⚠️ |
-| `contratos_firmados` | VC | | ⚠️ |
-| `n_ops_contratos` | VC | | ⚠️ |
-| `var_contratos_mom_arrow` | derivado | `▲`/`▼` + porcentaje | ⚠️ |
-| `delta_ops_contratos_full` | derivado | `±N ops (±X %)` | ⚠️ |
+| `contratos_mes_anterior` | RM-arras + RM-alq | (idem slide 2) | ✅ |
+| `n_ops_contratos_mes_anterior` | RM-arras + RM-alq | suma `num_operaciones` mes-1 | ✅ |
+| `contratos_firmados` | RM-arras + RM-alq | (idem slide 2) | ✅ |
+| `n_ops_contratos` | RM-arras + RM-alq | suma `num_operaciones` mes actual | ✅ |
+| `var_contratos_mom_arrow` | derivado | `▲`/`▼` + porcentaje (mismo cálculo que `var_contratos_mom`) | ✅ |
+| `delta_ops_contratos_full` | derivado | `±N ops (±X %)` (con `num_operaciones` de RM) | ✅ |
 
 ### Tarjeta · Comparativa interanual (vs ABRIL 2025)
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
 | `reservas_año_anterior` | CM | `pagas_señales` del año anterior | ⚠️ |
-| `contratos_año_anterior` | CM | `arras_firmadas` del año anterior | ⚠️ |
+| `contratos_año_anterior` | RM-arras + RM-alq | Suma de las 2 tablas para el mes del año anterior. Como alquileres no existía en 2025, solo suma ventas. | ✅ |
 | `var_reservas_yoy` | derivado | `(reservas_actual - reservas_año_anterior) / reservas_año_anterior` | ⚠️ |
-| `var_contratos_yoy` | derivado | `(contratos_actual - contratos_año_anterior) / contratos_año_anterior` | ⚠️ |
+| `var_contratos_yoy` | derivado | `(contratos_actual - contratos_año_anterior) / contratos_año_anterior` con ambos lados desde RM | ✅ |
 
 ### Tarjeta · Ticket medio por operación
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `ticket_medio` | derivado | `contratos_firmados / n_ops_contratos` (importe medio por operación de arras) | ✅ |
-| `ticket_medio_mes_anterior` | derivado | mismo cálculo aplicado al mes-1 | ✅ |
-| `var_ticket_medio_mom` | derivado | `(ticket_medio - ticket_medio_mes-1) / ticket_medio_mes-1` | ✅ |
+| `ticket_medio` | derivado | `honorarios / num_operaciones` desde **RM-arras + RM-alq** del mes (no desde VC). Abril 2026: 505.402 / 40 = `12.635 €`. | ✅ |
+| `ticket_medio_mes_anterior` | derivado | mismo cálculo aplicado al mes-1 con RM | ✅ |
+| `var_ticket_medio_mom` | derivado | `(ticket_medio - ticket_medio_mes-1) / ticket_medio_mes-1` (variación relativa porque los lados son importes, no %) | ✅ |
 
 ### Colores condicionales del slide 3
 
@@ -239,7 +252,7 @@ Gráfico de barras agrupadas: 3 períodos (`Abr '25`, `Mar '26`, `Abr '26`) × 2
 - El PNG se sube temporalmente a Drive, se sustituye en la plantilla con `replaceAllShapesWithImage` apuntando al token `{{grafico_reservas_arras}}`, y se borra de Drive tras exportar el PDF.
 - Helpers: `app/image_helpers.py` (upload, replace, cleanup).
 
-**Datos:** los 6 valores (3 períodos × 2 series) vienen del calculator en el campo especial `_chart_reservas_arras` del payload (no es un token, no pasa por `replaceAllText`).
+**Datos:** los 6 valores (3 períodos × 2 series) vienen del calculator en el campo especial `_chart_reservas_arras` del payload (no es un token, no pasa por `replaceAllText`). Las 3 barras de **Contratos Firmados** salen ahora de **RM-arras + RM-alq** (no de `ventas_comerciales`), coherente con el resto del slide 3.
 
 ---
 
@@ -258,12 +271,18 @@ Filtro base de todos los queries de alquileres: `inmueble LIKE 'ALQ.-%'`.
 
 ### Tarjeta · Reservas (señales)
 
+**Cambio 2026-05-20:** fuente migrada de `ventas_comerciales` a la nueva tabla
+`resumen_mensual_alquiler_senales` (`honorarios_cobrados` + `num_operaciones`).
+Función `_query_alquiler_senales_resumen`. Solo tiene datos 2026 (negocio
+de alquileres nació en 2026). Mismo caso especial septiembre: usa `'sept'`
+(4 letras).
+
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `reservas_alquiler` | VC | `SUM(honorarios_totales) WHERE alquiler AND fecha_senal en el mes` | ✅ |
+| `reservas_alquiler` | RM-alq-señales | `honorarios_cobrados` del mes. Abril 2026: `27.415 €`. | ✅ |
 | `var_reservas_alquiler_mom` | derivado | `(reservas_alq_actual - reservas_alq_mes-1) / reservas_alq_mes-1` con flecha `▲`/`▼` | ✅ |
-| `n_ops_reservas_alquiler` | VC | `COUNT(*) WHERE alquiler AND fecha_senal en el mes` | ✅ |
-| `delta_ops_reservas_alquiler` | derivado | `n_ops_actual - n_ops_mes-1` con sufijo `op.` | ✅ |
+| `n_ops_reservas_alquiler` | RM-alq-señales | `num_operaciones` del mes. Abril 2026: `12`. | ✅ |
+| `delta_ops_reservas_alquiler` | derivado | `n_ops_actual - n_ops_mes-1` con sufijo `op.` (abril vs marzo: 12−18 = `-6 op.`) | ✅ |
 
 ### Tarjeta · Contratos firmados
 
@@ -651,16 +670,16 @@ en el mes) ✅, B (cálculo final) ✅, C (tabla de atrasos) ⏳ pendiente fuent
 |---|---|---|---|
 | `mes_informe_upper` | derivado | `format_mes_upper(mes)` → `"ABRIL"` (mes en mayúsculas sin año). Usado en "FIRMADO Y COBRADO EN ABRIL". | ✅ |
 | `ingresos_totales` | CM | (heredado del slide 2) — banner superior | ✅ |
-| `tramo_comision` | constante | `"3 %"` (`TRAMO_COMISION_LABEL`). Pendiente escala por volumen (P-22). | ⏳ provisional |
+| `tramo_comision` | PD | **Dinámico (2026-05-20):** `SUM(porcentaje)` de `pagos_directores` para `(anio, mes)`. Mismo token que slide 1. Si no hay filas → `ValueError` explícito (lección P-27: nunca generar PDF con comisión 0 silenciosa). Resuelve P-22. | ✅ |
 
 ### Parte A — Firmado y cobrado en el mes ✅
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
 | `ventas_cobradas_mes` | `resumen_mensual_arras__sin_condicion.cobradas` | filtro `anio` + `mes` (string 3 letras). Solo Valencia. | ✅ |
-| `comision_ventas_mes` | derivado | `ventas_cobradas_mes × TRAMO_COMISION_PCT` (0.03) | ✅ |
+| `comision_ventas_mes` | derivado | `ventas_cobradas_mes × tramo_comision_pct` (tramo **dinámico** desde PD, no constante) | ✅ |
 | `alquileres_cobrados_mes` | `resumen_mensual_alquileres.honorarios_cobrados` | filtro `anio` + `mes`. OJO: esta tabla usa `'sept'` (4 letras) para septiembre, la otra usa `'sep'`. | ✅ |
-| `comision_alquileres_mes` | derivado | `alquileres_cobrados_mes × 0.03` | ✅ |
+| `comision_alquileres_mes` | derivado | `alquileres_cobrados_mes × tramo_comision_pct` | ✅ |
 | `subtotal_comision_mes` | derivado | `comision_ventas_mes + comision_alquileres_mes` | ✅ |
 
 ### Parte B — Cálculo final ✅ (con constante provisional)
@@ -679,8 +698,12 @@ en el mes) ✅, B (cálculo final) ✅, C (tabla de atrasos) ⏳ pendiente fuent
 |---|---|
 | `N_DIRECTORES` | entre o salga un director (marcado con `>>> ... <<<` en código) |
 | `SUELDO_FIJO_DIRECTOR` | cambie el sueldo fijo bruto |
-| `TRAMO_COMISION_PCT` / `TRAMO_COMISION_LABEL` | contabilidad confirme la escala de tramos (P-22) |
 | `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL` | se confirme la fuente de "COBRADO DE MESES ANTERIORES" (P-23) |
+
+> `TRAMO_COMISION_PCT` y `TRAMO_COMISION_LABEL` **ya no existen** en el código.
+> El tramo se calcula dinámicamente desde `pagos_directores` (`_query_tramo_comision`).
+> Para cambiar el porcentaje hoy: editar las filas de `pagos_directores` del mes
+> correspondiente. P-22 resuelto.
 
 Buscar `PROVISIONAL` o `>>>` en el código localiza todos estos puntos.
 
@@ -711,11 +734,20 @@ Valores posibles: `'CAÍDA'`, `'0'`, o un número `> 0` (lo pendiente).
 ```sql
 WHERE pte_facturar ~ '^[0-9]+\.?[0-9]*$'   -- numérico puro (descarta 'CAÍDA')
   AND CAST(pte_facturar AS NUMERIC) > 1     -- umbral anti-basura-float (P-24)
+  AND fecha_arras_sin_condic IS NOT NULL    -- excluye 'PONER FECHA' (2026-05-19)
 ORDER BY importe DESC
 ```
 
 El umbral `> 1` descarta basura de coma flotante de la ingesta
 (`'0.21000000000003638'` y similares). Ver P-24.
+
+**Filtro `fecha_arras_sin_condic IS NOT NULL` (añadido 2026-05-19):** excluye
+operaciones que en el Sheet origen tienen `"PONER FECHA"` como placeholder.
+La columna es de tipo `DATE` en Postgres, así que la ingesta castea ese texto
+no parseable a `NULL`. Esas operaciones aún no están listas para liquidar y
+no deben contar como cobro pendiente. Impacto real abril 2026: pasa de 31 a
+24 cobros, de `362.580 €` a `285.783 €` (se excluyen 7 operaciones por
+`76.797 €`). Alivia P-25 (menos cobros que slots disponibles).
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
@@ -738,25 +770,127 @@ filtro). Ver P-25 en PENDIENTES.md. El mismo riesgo aplica a slides 5 y 6.
 
 ---
 
-## Slides 8, 10 — Pendientes de integrar
+## Slide 8 — Break Even y objetivos de facturación ✅
 
-Listado resumido. Cada uno tendrá su sección detallada cuando se ataque.
+Tarjeta izquierda con una **barra/línea de tiempo vertical** (4 hitos: 30%, 20%,
+10%, BREAK EVEN) y un marcador `{{ingresos_totales}}` que se **posiciona
+dinámicamente** entre los hitos. Tarjeta derecha con tabla de objetivos y
+estados.
 
-| Slide | Contenido | Fuentes esperadas | Notas |
+### Fuente
+
+Tabla `contabilidad_mensual`, escenario `con_crm` (confirmado por contabilidad,
+2026-05-19), **variante sin extras**: columnas `break_even` e
+`ingresos_margen_10..40` (no las `*_con_extras`). Dataclass `BreakEvenMes`,
+query `_query_break_even(sede, escenario, anyo, mes)`.
+
+### Tokens
+
+| Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| 8 | Break Even abril | CM (break_even, ingresos_margen_*, ebitda) + narrativa | Narrativa templating determinista (P-07) |
-| 10 | Break Even mayo (proyección) | CM mes+1 (proyectados) | Mismo patrón que slide 8 sin narrativa |
+| `sede_upper`, `mes_año_upper` | (heredados) | ya emitidos arriba | ✅ |
+| `ingresos_totales` | CM | `ingresos_contables` (heredado) | ✅ |
+| `break_even` | CM | columna `break_even` (variante sin extras) | ✅ |
+| `margen_10_objetivo` | CM | `ingresos_margen_10` | ✅ |
+| `margen_20_objetivo` | CM | `ingresos_margen_20` | ✅ |
+| `margen_30_objetivo` | CM | `ingresos_margen_30` | ✅ |
+| `margen_40_objetivo` | CM | `ingresos_margen_40` | ✅ |
+| `margen_seguridad` | derivado | `ingresos_contables − break_even`. Positivo si cubre el BE, negativo si déficit. | ✅ |
+| `break_even_estado` | derivado | `"✓ SUPERADO"` si `ingresos ≥ umbral`, si no `"FALTAN: <X> €"` (cuánto falta = umbral − ingresos) | ✅ |
+| `margen_N_estado` | derivado | (mismo patrón para cada margen 10/20/30/40) | ✅ |
+| `narrativa_break_even` | derivado | **Plantilla determinista** (NO LLM) en `_narrativa_break_even`. 3 ramas según el signo de `margen_seguridad`: supera / iguala exactamente / déficit. Cada rama tiene texto propio. | ✅ |
+
+### Color condicional `margen_seguridad`
+
+| Condición | Color |
+|---|---|
+| `margen_seguridad ≥ 0` (cubre BE) | verde |
+| `margen_seguridad < 0` (déficit) | rojo |
+
+Sin este override, el token estaba en verde fijo en la plantilla → un déficit
+saldría en verde, comunicando lo contrario de la realidad.
+
+### Posicionamiento dinámico del marcador ✅ (2026-05-20)
+
+La plantilla del slide 8 tiene una barra vertical con 4 hitos a Y fijas (de
+arriba a abajo): m30, m20, m10, BE. Entre ellos vive el shape
+`{{ingresos_totales}}` ("FACTURACIÓN COBRADA"). Para que el slide refleje
+correctamente la facturación de cualquier mes, el shape se **mueve por API**
+según los ingresos reales del mes.
+
+**Algoritmo** (`app/break_even_chart.py`):
+
+1. `locate_breakeven_anchors()` lee la plantilla y captura la **Y absoluta**
+   de los 4 hitos + el `objectId` del marcador. Camina recursivamente en
+   `elementGroup`s y compone `translateY` padre+hijo (4 de los 5 hitos del
+   slide 8 viven dentro de grupos).
+2. `compute_marker_y()` (función PURA, testeable): según los valores reales
+   `(ingresos, break_even, m10, m20, m30)` y las anclas Y, devuelve el Y
+   destino:
+   - Si `ingresos ≤ break_even` → topa al fondo (Y_break_even).
+   - Si `ingresos ≥ margen_30` → topa al techo (Y_margen_30).
+   - Si está dentro de un tramo `(V_b, V_a)`: interpolación lineal
+     `Y = Y_b + ratio × (Y_a − Y_b)` con `ratio = (ingresos − V_b) / (V_a − V_b)`.
+3. `apply_breakeven_marker_position()` envía un `updatePageElementTransform`
+   con `applyMode: ABSOLUTE` (idempotente, no acumula al transform actual).
+
+**Detalle clave: la llamada va ANTES de `_replace_tokens`** en el `generator`.
+Si se hiciese después, los tokens ya estarían sustituidos por sus valores y
+`locate_breakeven_anchors` no podría identificar los hitos.
+
+**Payload:** clave especial `_break_even_position` con los 5 valores numéricos
+(`ingresos`, `break_even`, `margen_10/20/30`). El calculator la emite junto a
+`_color_overrides` y `_chart_reservas_arras`. El generator la extrae antes del
+`expand_lists` (no es un token de `replaceAllText`).
+
+**Defensivo:**
+- Si falta cualquier hito en la plantilla → WARNING, no se mueve nada.
+- Si falta cualquier valor (None) → WARNING, no se mueve nada.
+- El `try/except` en `generator.py` aísla un fallo aquí del resto del PDF.
+
+**El shape `{{ingresos_totales}}` puede llevar acompañado el label "FACTURACIÓN
+COBRADA"** dentro del mismo shape (la plantilla lo organiza así). Al mover el
+shape, ambos textos se mueven juntos — comportamiento deseado.
+
+**Validación:** 21 tests unitarios de `compute_marker_y` en
+`tests/test_break_even_chart.py` (bordes, hitos, interpolación 3 tramos,
+None inputs, tipos, monotonía estricta). Script
+`scripts/simular_break_even.py <ingresos>` permite generar PDFs con valores
+ficticios sin tocar BD, para validar visualmente escenarios extremos
+(ingresos < BE, ingresos > m30, etc.).
 
 ---
 
-## Tokens deprecados o sin uso actual
+## Slide 10 — Break Even proyectado (mes siguiente) ✅
 
-Tokens que el JSON mock todavía contiene pero que el calculator de hoy no produce. Quedarán cubiertos en próximas iteraciones:
+Versión simplificada del slide 8 con la proyección del **mes+1**. **Sin estados
+dinámicos ni narrativa** (los textos "SUPERVIVENCIA / OBJETIVO / ÓPTIMO /
+EXCELENCIA" son fijos en plantilla). Solo llega a margen 30% (no hay m40).
 
-- `mes_anterior_short`, `mes_año_anterior_short` (formato `Mar '26`, `Abr '25`) — sí los emite el calculator.
-- `mes_siguiente_upper`, `mes_siguiente_upper_solo` — para slide 10.
-- Todos los `_proy` (proyección mayo) — slide 10.
-- `volumen_riesgo`, `n_ops_condicionadas`, `total_pendiente_cobro`, etc. — slides 6, 7.
+### Fuente
+
+`contabilidad_mensual` para `(sede, escenario, anyo_next, mes_next)`. Reutiliza
+`_query_break_even` con los valores del mes siguiente.
+
+### Tokens
+
+| Token | Fuente | Cálculo / nota | Estado |
+|---|---|---|---|
+| `sede_upper` | (heredado) | igual que slide 8 | ✅ |
+| `mes_siguiente_upper_solo` | derivado | `format_mes_upper(mes_next)` → `MAYO` (sin año) | ✅ |
+| `break_even_proy` | CM mes+1 | `break_even` del mes siguiente | ✅ |
+| `facturacion_objetivo_proy` | CM mes+1 | **= `break_even_proy`** (decisión: el mínimo a facturar) | ✅ |
+| `margen_10_objetivo_proy` | CM mes+1 | `ingresos_margen_10` del mes siguiente | ✅ |
+| `margen_20_objetivo_proy` | CM mes+1 | `ingresos_margen_20` del mes siguiente | ✅ |
+| `margen_30_objetivo_proy` | CM mes+1 | `ingresos_margen_30` del mes siguiente | ✅ |
+
+### Dependencia importante
+
+El slide 10 requiere que **la fila del mes+1 ya esté cargada** en
+`contabilidad_mensual`. Si no existe (ej. generar el informe antes de que
+contabilidad cargue el snapshot del mes siguiente), los 6 tokens proyectados
+saldrían vacíos (`format_euro(None)` → `""`). No rompe; el slide queda en
+blanco. Conviene que contabilidad cargue siempre el mes siguiente.
 
 ---
 
@@ -767,9 +901,13 @@ Valores que hoy están fijos en código pero deberían ser parámetros por sede/
 | Constante | Valor actual | Razón futura |
 |---|---|---|
 | `OBJETIVO_RENTABILIDAD` | `"20 %"` | Puede variar por sede o cambiar anualmente |
-| `tramo_comision` | `"3 %"` | Varía según volumen mensual (escalas) |
+| `INVERSION_TECNOLOGICA_PROVISIONAL` | `"27k€"` | Origen sin confirmar (P-21) |
+| `N_DIRECTORES` | `2` | Si entra/sale un director (slide 9 reparto) |
+| `SUELDO_FIJO_DIRECTOR` | `2666.67 €` | Si cambia el sueldo bruto |
+| `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL` | `1021.89 €` | Cuando llegue la fuente real (P-23) |
 
-Cuando lleguen los datos de comisiones reales, crear tabla `parametros_sede_mes` o similar.
+> `TRAMO_COMISION_PCT/LABEL` **ya no están** en esta lista: se resolvieron
+> 2026-05-20 leyendo de `pagos_directores`.
 
 ---
 
@@ -784,3 +922,145 @@ Cuando lleguen los datos de comisiones reales, crear tabla `parametros_sede_mes`
 ## Discrepancias conocidas
 
 Ver **P-18** en [`PENDIENTES.md`](../PENDIENTES.md): los datos de `ventas_comerciales` cuentan menos operaciones que los cuadros agregados manuales del Sheet. Afecta a varios tokens del slide 2 y slide 3. Pendiente validar con contabilidad si faltan operaciones por migrar o si el cuadro manual tiene errores.
+
+---
+
+## Aprendizajes técnicos (sesiones de debug)
+
+Notas no obvias del comportamiento del sistema, descubiertas resolviendo bugs.
+Quedan aquí para no repetir el debug en el futuro.
+
+### 1. Diagnóstico de tokens vacíos en el PDF (orden de descarte)
+
+Cuando un token sale vacío o literal en el PDF, **hay 3 causas posibles** y
+hay que descartarlas en este orden:
+
+1. **Token partido en `textRun`s** de la plantilla (Slides los fragmenta al
+   editar). El validador `check_tokens.py` NO lo detecta. Síntoma: el `{{`
+   y el `}}` están en runs distintos.
+2. **El calculator no produce el token**. El validador SÍ lo marca (🔴).
+3. **El dato llegó NULL de la ingesta** (ej. cambio de etiqueta en el Sheet
+   contable, ver P-27). El validador NO lo ve. **Verificar siempre con un
+   `SELECT` directo** a la tabla origen cuando 1 y 2 están descartadas.
+
+### 2. Datos faltantes en `ventas_comerciales` ≠ bug de query
+
+Patrón recurrente (P-20 obra nueva, P-28 condicionadas): cuando un total de
+`ventas_comerciales` no cuadra con el original Y la query está validada,
+**sospechar primero de datos faltantes en la ingesta** antes que del código.
+Comprobar con `SELECT` de los inmuebles esperados. Ejemplos resueltos:
+- Slide 5 Santa Bárbara: desfase 587k vs 505k → operaciones ausentes.
+- Slide 6 condicionadas: `Paseo Alameda 41`, `C. Doctor Villena 20` ausentes.
+
+### 3. Colorea por VALOR de texto, no por nombre de token
+
+`apply_color_overrides` busca shapes **por el valor de texto** que tiene el
+token tras `_replace_tokens`, no por el nombre del token. Si dos tokens
+distintos (`var_reservas_mom` en slide 2, `var_reservas_mom_observacion` en
+slide 11) tienen el **mismo valor visible** (`-13,9 %`), la búsqueda los
+encuentra en AMBOS slides y el último override aplicado gana.
+
+**Fix aplicado:** los tokens `_observacion` llevan un sufijo invisible
+`​` (zero-width space). Visualmente idéntico, técnicamente distinto.
+No tocar ese sufijo en `calculator.py`.
+
+Ver también `feedback_color_caja_unica.md` en memoria.
+
+### 4. Variaciones entre porcentajes: puntos porcentuales vs variación relativa
+
+`_variacion(a, b)` da `(a-b)/b` = **variación relativa**. Correcto cuando
+ambos lados son importes (ej. `reservas_actual` vs `reservas_mes-1`).
+
+Pero **cuando ambos lados ya son porcentajes** (ej. `rentabilidad_operativa_pct`
+de abril vs marzo), `_variacion` produce un número confuso. Para rentabilidades
+hay que hacer **resta directa** (diferencia en puntos porcentuales):
+`(0.3038 - 0.3099) = -0.0061` → `-0,61 %`. NO `_variacion` (daría `-1,97 %`).
+
+Aplicado en `var_rentab_mom` (slide 2 card 4) 2026-05-20.
+
+### 5. Slides API: posicionar shapes dentro de `elementGroup`s
+
+`pageElements` solo da el primer nivel del slide. Si un shape vive dentro de
+un `elementGroup`, hay que caminar `el["elementGroup"]["children"]`
+recursivamente.
+
+Además, la `translateY` de un shape dentro de un grupo es **relativa al
+grupo**, no absoluta a la página. Para obtener la Y absoluta hay que
+**componer**: `Y_abs = parent.translateY + child.translateY`.
+
+Función helper `_walk_text_shapes` en `app/break_even_chart.py`.
+
+### 6. Posicionar shapes ANTES de `_replace_tokens`
+
+Cualquier paso que necesite identificar shapes por sus tokens `{{...}}`
+literales (ej. el posicionamiento del marcador break even) tiene que ir
+**ANTES** de la llamada a `_replace_tokens`. Una vez sustituidos los
+tokens por sus valores formateados, no hay forma de identificar el shape
+("232.188 €" puede ser cualquier cosa).
+
+Orden de pasos en `generator.generate_report`:
+1. `_copy_template`
+2. **`apply_breakeven_marker_position`** ← antes que replace
+3. `_replace_tokens`
+4. `apply_color_overrides`
+5. Insertar gráfico slide 3
+6. `_export_pdf_bytes`
+
+### 7. `updatePageElementTransform`: usar `ABSOLUTE`
+
+Por defecto `applyMode = "RELATIVE"` aplica el transform **encima del
+actual**. Para idempotencia (poder re-ejecutar sin acumular desplazamientos),
+usar `applyMode = "ABSOLUTE"`: el transform final es exactamente el que
+envías.
+
+### 8. Tabla `pago_agentes`: `fecha_arras_sin_condic` y "PONER FECHA"
+
+La columna `fecha_arras_sin_condic` en `pago_agentes` es de tipo `DATE`. Si
+en el Sheet origen un comercial escribe `"PONER FECHA"` como placeholder
+(operación aún sin fecha definida), la ingesta n8n castea ese texto a
+**`NULL`** (no parseable como fecha).
+
+El slide 7 filtra `fecha_arras_sin_condic IS NOT NULL` para excluir esas
+filas (no están listas para liquidar). Documentado 2026-05-19.
+
+### 9. Constantes hardcoded vs `pagos_directores`
+
+El tramo de comisión (slide 1 y 9) era una constante `0.03` hardcoded. Pero
+realmente **suma los porcentajes de los directores del mes**. Al haber una
+tabla `pagos_directores` con una fila por director y mes, el código ahora
+lee y suma esos `porcentaje` dinámicamente.
+
+Beneficio colateral: funciona con N directores variable sin tocar código.
+Si entra/sale un director, basta con añadir/quitar filas en la tabla.
+
+### 10. Guard explícito vs PDF con dato 0 silencioso
+
+Lección de P-27 (ingesta cargó NULL silenciosamente y el PDF salió con
+huecos). Política: si **falta un dato crítico** que sin él el informe queda
+incoherente, **lanzar `ValueError` explícito** en el calculator en lugar de
+generar un PDF con `0 €` que pase desapercibido.
+
+Aplicado en:
+- `_query_contable` → `cont_actual is None`: `raise ValueError("Carga primero contabilidad_mensual")`.
+- `_query_tramo_comision` → si no hay filas: `raise ValueError("Carga primero pagos_directores")`.
+
+### 11. `n_max` en `LIST_SPECS` debe coincidir con slots reales de plantilla
+
+`expand_lists(payload, LIST_SPECS)` emite N pares `prefix_i_field` para
+i=1..n_max. Si la plantilla tiene **más slots que n_max**, los slots extra
+quedan como **tokens literales** en el PDF (`{{condicionada_13_nombre}}`).
+**No genera warning** porque "tokens no encontrados" mira el sentido opuesto
+(payload con tokens que plantilla no tiene).
+
+Hay que mantener `n_max` ≥ número de slots de la plantilla. Slides actuales:
+- `ventas_pendientes`: n_max=21 (slots 1..21 en plantilla).
+- `operaciones_condicionadas`: n_max=22 (slots 1..22 en plantilla).
+- `cobros_pendientes`: n_max=26.
+- `obras_nuevas`: n_max=4.
+
+### 12. Negocio de alquileres nació en 2026
+
+Las tablas `resumen_mensual_alquileres` y `resumen_mensual_alquiler_senales`
+solo tienen filas para 2026 porque alquileres no existía como producto en
+2025. Eso hace que el YoY de contratos sume solo ventas para el año
+anterior — **es el dato correcto**, no una asimetría a corregir.

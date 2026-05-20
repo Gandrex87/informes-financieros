@@ -16,9 +16,11 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 
 - **Sprint 13** ✅: token `mes_anterior_capitalizado` (slide 2 "vs Marzo" dinámico). Incidente P-27 resuelto (ingesta cargaba NULL por cambio de etiquetas en el Sheet).
 
-- **Sprint 14** ✅: debug slide por slide (2→12) + extracción `calculator_base.py`. Fix color slide 2 card 1 (bug producción: `_observacion` pintaba el slide 2 en amarillo → sufijo `​`). P-20 cerrado (desfase obra nueva = datos faltantes en ingesta, no bug). Datos faltantes de condicionadas insertados a mano → P-28 abierto. MAPEO_DATOS actualizado.
+- **Sprint 14** ✅: debug slide por slide (2→12) + extracción `calculator_base.py`. Fix color slide 2 card 1 (bug producción: `_observacion` pintaba el slide 2 en amarillo → sufijo `​`). P-20 cerrado (desfase obra nueva = datos faltantes en ingesta, no bug). Datos faltantes de condicionadas insertados a mano → P-28 abierto.
 
-Próximos pasos: slides 8 y 10 (Break Even). Slide 9 Parte C pendiente fuente. Cambiar API Key débil de producción (P-26). Decisión P-25 (cobros que no caben). Endurecer ingesta ante NULL (P-27). Confirmar comportamiento ingesta vs filas manuales (P-28). Bug etiqueta plantilla slide 2 card 1 (`{{mes_anterior_short}}`→`{{mes_año_anterior_short}}`). Validar P-18, P-21..P-24 con contabilidad.
+- **Sprint 15** ✅: **slides 8 y 10 integrados** (Break Even mes actual + proyección mes+1, escenario `con_crm` sin extras, narrativa determinista 3 ramas, estados ✓SUPERADO/FALTAN, margen seguridad con color condicional). **Posicionamiento dinámico** del marcador `{{ingresos_totales}}` en la barra del slide 8 vía `updatePageElementTransform` con interpolación proporcional entre los 4 hitos (módulo nuevo `app/break_even_chart.py`, 21 tests unitarios, script `scripts/simular_break_even.py` para validar escenarios). **Fuentes resumen mensual:** `contratos_firmados` y derivados ahora desde `resumen_mensual_arras` + `resumen_mensual_alquileres` (slides 1/2/3, gráfico incluido); `reservas_alquiler` (slide 4) desde `resumen_mensual_alquiler_senales`. **Tramo de comisión dinámico** desde `pagos_directores` (P-22 cerrado). **Fix `var_rentab_mom`** (slide 2 card 4): puntos porcentuales en vez de variación relativa. **Filtro slide 7** `fecha_arras_sin_condic IS NOT NULL` (excluye operaciones "PONER FECHA"). **`n_max`** alineados con plantilla: ventas_pendientes 18→21, operaciones_condicionadas 12→22 (corrige bug latente de tokens literales visibles). MAPEO_DATOS actualizado con sección de **Aprendizajes técnicos** (12 puntos).
+
+Próximos pasos: Slide 9 Parte C pendiente fuente (P-23). Cambiar API Key débil de producción (P-26). Decisión P-25 (cobros que no caben — alivia con filtro IS NOT NULL del slide 7). Endurecer ingesta ante NULL (P-27). Confirmar comportamiento ingesta vs filas manuales (P-28). Bug etiqueta plantilla slide 2 card 1 (`{{mes_anterior_short}}`→`{{mes_año_anterior_short}}`). Validar P-18, P-21 con contabilidad.
 
 ---
 
@@ -226,11 +228,20 @@ La tabla de atrasos del slide 9 (operaciones de meses anteriores cobradas este m
 
 **Acción:** preguntar a contabilidad de dónde sale "Cobrado de meses anteriores". Cuando se confirme: implementar `_query_comisiones_atrasos()`, poblar la lista `comisiones_atrasos`, y calcular `subtotal_comision_atrasos` como su suma (en lugar de la constante).
 
-### P-22 · Tramo de comisión — ¿constante o escala por volumen? (slide 9)
+### P-22 · Tramo de comisión — ✅ CERRADO (2026-05-20)
 
-Hoy `TRAMO_COMISION_PCT = 0.03` fijo. El slide dice "TRAMO MÁXIMO ALCANZADO" + "Volumen Facturación", lo que sugiere una escala por volumen de facturación.
+**RESUELTO.** El tramo NO es constante ni escala por volumen: es la **suma de
+porcentajes de los directores del mes** en `pagos_directores`. Implementado
+`_query_tramo_comision(anyo, mes)` que devuelve `SUM(porcentaje)`. Abril 2026:
+ALEX 0,015 + FADIA 0,015 = `0,03` (3%). Eliminadas constantes
+`TRAMO_COMISION_PCT/LABEL`. El tramo se refleja dinámicamente en slide 1 y
+slide 9, y se usa para calcular `comision_ventas_mes` y `comision_alquileres_mes`.
 
-**Acción:** preguntar a contabilidad la tabla de tramos (ej. <300k → 2%, 300-500k → 3%...). Si es escala, implementar lookup por volumen en lugar de constante.
+**Beneficio colateral:** funciona con N directores variable sin tocar código.
+Si entra/sale un director, basta con añadir/quitar filas en `pagos_directores`.
+
+**Guard explícito:** si no hay filas para el mes → `ValueError` (no PDF con
+comisión 0 silenciosa, lección P-27).
 
 ### P-21 · Origen de `inversion_tecnologica` (slide 12)
 
@@ -486,15 +497,13 @@ Bajo coste de implementación, alto valor antes de exponer públicamente.
 
 Orden sugerido (cada uno desbloquea o aporta valor visible):
 
-1. **Extender calculator a slide 8** (Break Even abril) — datos ya en `contabilidad_mensual`, queda solo mapear.
-2. **Extender calculator a slide 10** (Break Even mayo proyectado) — mismo patrón que slide 8.
-3. **P-18, P-21** — validar discrepancias y constantes provisionales con contabilidad (acción externa, en paralelo). *(P-20 ya cerrado.)*
-4. **P-07** — narrativa determinista del slide 8 (cuando lleguemos a ese slide).
-5. **P-12** — comando de validación de tokens (productividad, opcional).
-6. **Calculator slide 9** — comisiones con atrasos (complejo: multi-fuente).
-7. **Slide 7** — cobros pendientes, pausado hasta confirmar fuente de datos con contabilidad.
-8. **P-01** — migración cuenta corporativa (cuando se confirme).
-9. **P-15** — workflow n8n con datos reales (depende del calculator completo).
-10. **P-17** — API Key antes de pasar a producción.
-11. **P-16** — despliegue al servidor.
-12. **P-09, P-13, P-14** — multi-sede, tests, observabilidad (pulido).
+1. **P-26** — rotar API Key débil de producción (bloqueante antes de entrega ERP).
+2. **P-23** — confirmar fuente de "COBRADO DE MESES ANTERIORES" (slide 9 Parte C, último bloqueo del calculator de Valencia).
+3. **Commit + despliegue** de todo lo de Sprint 15 al servidor de producción.
+4. **P-21** — confirmar con contabilidad origen de `inversion_tecnologica` (27k€).
+5. **P-28** — confirmar comportamiento de la ingesta n8n vs filas manuales en `ventas_comerciales` (UPSERT por `numero` o INSERT ciego).
+6. **P-18** — validar discrepancias del slide 2/3 con contabilidad (acción externa).
+7. **Plantilla:** fix card 1 slide 2 (`{{mes_anterior_short}}` → `{{mes_año_anterior_short}}`).
+8. **P-27** — endurecer ingesta n8n para fallar si concepto esperado no aparece (NULL silenciosos).
+9. **P-09** — arrancar informe Alicante (calculator separado, plantilla nueva, ~10 slides).
+10. **P-25** — decisión final cobros que no caben (aliviado pero no resuelto).

@@ -1,0 +1,121 @@
+{
+  "_color_overrides": {
+    "var_reservas_mom": "verde",
+    "var_contratos_mom": "verde",
+    "var_ingresos_mom": "verde",
+    "var_rentab_mom": "verde",
+
+    "var_reservas_mom_arrow": "verde",
+    "var_contratos_mom_arrow": "verde",
+    "var_ticket_medio_mom": "verde",
+
+    "break_even_estado": "verde",
+    "margen_10_estado": "verde",
+    "margen_20_estado": "verde",
+    "margen_30_estado": "verde",
+    "margen_40_estado": "rojo",
+    "margen_seguridad": "verde"
+  },
+
+  "sede": "Alicante",
+  "sede_upper": "ALICANTE",
+  "mes_año": "Abril 2026",
+  "mes_año_upper": "ABRIL 2026",
+  "mes_anterior_short": "Mar '26",
+  "mes_anterior_capitalizado": "Marzo",
+  "mes_anterior_upper": "MAR 2026",
+  "mes_año_upper_short": "ABR 2026",
+
+  "reservas_totales": "164.375 €",
+  "contratos_firmados": "204.230 €",
+  "ingresos_totales": "157.953 €",
+  "tramo_comision": "4 %",
+
+  "var_reservas_mom": "+16,2 %",
+  "n_ops_reservas": "8",
+  "delta_ops_reservas": "- 5 ops",
+  "reservas_mes_anterior": "141.504 €",
+
+  "var_contratos_mom": "+149 %",
+  "n_ops_contratos": "12",
+  "delta_ops_contratos": "+ 5 ops",
+  "contratos_mes_anterior": "81.924 €",
+
+  "var_ingresos_mom": "+164,7 %",
+  "ingresos_mes_anterior": "59.674 €",
+  "margen_bruto": "60,00 %",
+
+  "rentabilidad_op": "27,9 %",
+  "var_rentab_mom": "+201 %",
+  "resultado_op": "44.068 €",
+  "objetivo_rentabilidad": "20 %",
+
+  "n_ops_reservas_mes_anterior": "13",
+  "var_reservas_mom_arrow": "▲ +16,2 %",
+  "delta_ops_reservas_full": "- 5 ops (-38 %)",
+
+  "n_ops_contratos_mes_anterior": "7",
+  "var_contratos_mom_arrow": "▲ +149,3 %",
+  "delta_ops_contratos_full": "+ 5 ops (+71 %)",
+
+  "ticket_medio": "17.019 €",
+  "ticket_medio_mes_anterior": "11.703 €",
+  "var_ticket_medio_mom": "+45,4 %",
+
+  "trimestre": "Q2",
+  "total_ventas_pipeline": "59.989 €",
+  "total_pipeline_alquiler": "0 €",
+  "total_pipeline": "59.989 €",
+
+  "ventas_pendientes": [
+    {"nombre": "C. Maestro Marqués 92", "importe": "5.964 €"},
+    {"nombre": "C. Salinas 7", "importe": "6.000 €"},
+    {"nombre": "Av. Holanda 15", "importe": "18.900 €"},
+    {"nombre": "C. Cigüeña 4", "importe": "17.325 €"},
+    {"nombre": "Av. Condominia 1", "importe": "11.800 €"}
+  ],
+
+  "pipeline_alquiler": [],
+
+  "total_pendiente_cobro_sin_euro": "90.120,25",
+  "mes_siguiente_capitalizado": "Mayo",
+  "nota_cobros": "Cobrada el 7/05/2026",
+
+  "cobros_pendientes": [
+    {"nombre": "C. Zarzas 30", "importe": "13.595 €"},
+    {"nombre": "C. Vicente Aleixandre 38", "importe": "6.525 €"},
+    {"nombre": "C. Islandia 6", "importe": "70.000 €"}
+  ],
+
+  "mes_informe_upper": "ABRIL",
+  "ventas_cobradas_mes": "127.703 €",
+  "comision_ventas_mes": "5.108 €",
+  "alquileres_cobrados_mes": "0 €",
+  "comision_alquileres_mes": "0 €",
+  "subtotal_comision_mes": "5.108 €",
+
+  "subtotal_comision_atrasos": "240 €",
+  "total_comision_repartir": "5.348,18 €",
+  "comision_variable_por_director": "5.348,18 €",
+  "sueldo_fijo_director": "1.933,73 €",
+  "total_por_director": "7.281,91 €",
+
+  "comisiones_atrasos": [
+    {"nombre": "Av. Ibiza 35:", "mes": "(en feb,", "tramo": "al 3%)", "importe": "240 €"},
+    {"nombre": "C. Garbinet:", "mes": "(en mar,", "tramo": "al 0%)", "importe": "0 €"},
+    {"nombre": "C. Alcalde Carratalá:", "mes": "(en mar,", "tramo": "al 0%)", "importe": "0 €"}
+  ],
+
+  "break_even": "84.506 €",
+  "margen_10_objetivo": "101.408 €",
+  "margen_20_objetivo": "126.759 €",
+  "margen_30_objetivo": "169.013 €",
+  "margen_40_objetivo": "253.519 €",
+  "break_even_estado": "✓ SUPERADO",
+  "margen_10_estado": "✓ SUPERADO",
+  "margen_20_estado": "✓ SUPERADO",
+  "margen_30_estado": "✓ SUPERADO",
+  "margen_40_estado": "FALTAN: 49.289 €",
+  "margen_seguridad": "73.447 €",
+  "narrativa_break_even": "Los ingresos reales del mes (157.953 euros) han superado ampliamente el Break Even, consolidando un margen de seguridad en caja de:\n\nParalelamente, los 204.230 € firmados en arras garantizan nuestra facturación futura."
+}
