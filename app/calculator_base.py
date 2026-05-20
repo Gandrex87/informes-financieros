@@ -367,6 +367,31 @@ def _query_alquiler_senales_resumen(anyo: int, mes: int) -> ContratosResumenMes:
     )
 
 
+def _query_tramo_comision(anyo: int, mes: int) -> Decimal | None:
+    """Tramo de comision del mes = SUMA de porcentajes de los directores.
+
+    Fuente: pagos_directores (una fila por director y mes). El tramo es
+    la suma de la columna `porcentaje` de todas las filas de ese
+    (anio, mes). Ej. abril: ALEX 0.0150 + FADIA 0.0150 = 0.0300 (3%).
+
+    Funciona con N directores variable (no hay que tocar constantes si
+    entra/sale un director: se refleja en las filas de la tabla).
+    Filtro mes = string 3 letras. Devuelve None si no hay filas.
+    """
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    mes_label = _MES_LABEL_3[mes]
+    sql = f"""
+        SELECT SUM(porcentaje) AS tramo, COUNT(*) AS n_dir
+        FROM {schema}.pagos_directores
+        WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+    """
+    with connection() as conn:
+        row = conn.execute(sql, {"anyo": anyo, "mes_label": mes_label}).fetchone()
+    if not row or row["n_dir"] == 0 or row["tramo"] is None:
+        return None
+    return row["tramo"]
+
+
 def _query_cobros_pendientes() -> list[dict]:
     """Cobros pendientes de liquidacion (slide 7).
 
@@ -377,6 +402,11 @@ def _query_cobros_pendientes() -> list[dict]:
     - Solo strings numericos puros (descarta 'CAÍDA').
     - Valor > 1 para descartar basura de coma flotante de la ingesta
       (ej. '0.21000000000003638' que es ruido, no un cobro real). Ver P-24.
+    - fecha_arras_sin_condic IS NOT NULL: excluye operaciones que en el
+      Sheet origen tienen "PONER FECHA" (placeholder de fecha pendiente).
+      La ingesta castea esa columna a DATE, por lo que el texto no
+      parseable se carga como NULL. Esas operaciones aun no estan listas
+      para liquidar y no deben contar como cobro pendiente.
 
     Sin filtro de mes: es el estado vivo de cobros pendientes (dato de tipo
     "foto actual", ver seccion HIBRIDO en docs/MAPEO_DATOS.md).
@@ -389,6 +419,7 @@ def _query_cobros_pendientes() -> list[dict]:
         FROM {schema}.pago_agentes
         WHERE pte_facturar ~ '^[0-9]+\\.?[0-9]*$'
           AND CAST(pte_facturar AS NUMERIC) > 1
+          AND fecha_arras_sin_condic IS NOT NULL
         ORDER BY importe DESC;
     """
     with connection() as conn:

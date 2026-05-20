@@ -110,6 +110,7 @@ from app.calculator_base import (
     _query_comercial,
     _query_contable,
     _query_contratos_resumen,
+    _query_tramo_comision,
     _variacion,
 )
 from app.formatter import (
@@ -136,10 +137,9 @@ logger = logging.getLogger(__name__)
 
 OBJETIVO_RENTABILIDAD = "20 %"  # constante corporativa
 
-# Slide 9 - tramo de comision. Hoy fijo al 3%. Pendiente que contabilidad
-# confirme si es una escala por volumen de facturacion (ver P-22).
-TRAMO_COMISION_PCT = Decimal("0.03")  # 3%
-TRAMO_COMISION_LABEL = "3 %"
+# Slide 9 - el tramo de comision ya NO es constante: se calcula
+# dinamicamente como SUM(porcentaje) de pagos_directores del mes
+# (ver _query_tramo_comision en calculator_base). Resuelve P-22.
 
 # Slide 9 - parametros del calculo de comision por director.
 # TODO multi-sede / parametros_sede_mes: cuando varie por sede o entre
@@ -558,11 +558,20 @@ def build_payload_slide_2(
     )
 
     # --- Slide 9: comisiones (Parte A: firmado y cobrado en el mes) ---
-    # La comision es el tramo (hoy 3%) sobre lo cobrado.
+    # El tramo de comision es DINAMICO: suma de los porcentajes de los
+    # directores del mes en pagos_directores (ej. abril: 0.015+0.015=0.03).
+    # Si falta el dato fallamos explicito en lugar de generar un PDF con
+    # comision 0 silenciosa (leccion P-27: dato faltante de ingesta).
+    tramo_comision_pct = _query_tramo_comision(anyo, mes)
+    if tramo_comision_pct is None:
+        raise ValueError(
+            f"No hay tramo de comision en pagos_directores para "
+            f"{anyo}-{mes:02d}. Carga primero pagos_directores."
+        )
     ventas_cobradas = arras_cobradas if arras_cobradas is not None else Decimal(0)
     alquileres_cobrados = alq_cobrados if alq_cobrados is not None else Decimal(0)
-    comision_ventas_mes = ventas_cobradas * TRAMO_COMISION_PCT
-    comision_alquileres_mes = alquileres_cobrados * TRAMO_COMISION_PCT
+    comision_ventas_mes = ventas_cobradas * tramo_comision_pct
+    comision_alquileres_mes = alquileres_cobrados * tramo_comision_pct
     subtotal_comision_mes = comision_ventas_mes + comision_alquileres_mes
 
     # Parte B: calculo final. subtotal_atrasos hoy es constante provisional
@@ -664,8 +673,8 @@ def build_payload_slide_2(
     if var_contratos_mom is not None:
         color_overrides["var_contratos_mom_observacion"] = "amarillo"
 
-    # --- Tramo de comision: por ahora hardcoded, vendra de parametros_sede_mes ---
-    tramo_comision = "3 %"
+    # --- Tramo de comision: dinamico desde pagos_directores (ej. "3 %") ---
+    tramo_comision = format_pct(tramo_comision_pct, decimales=0)
 
     return {
         "_color_overrides": color_overrides,
@@ -809,7 +818,7 @@ def build_payload_slide_2(
         # --- Slide 9: Comisiones (Parte A: firmado y cobrado en el mes) ---
         # Mes del informe en mayusculas sin año, para "FIRMADO Y COBRADO EN ABRIL".
         "mes_informe_upper": format_mes_upper(mes),
-        "tramo_comision": TRAMO_COMISION_LABEL,
+        "tramo_comision": tramo_comision,
         "ventas_cobradas_mes": format_euro(ventas_cobradas, decimales=2),
         "comision_ventas_mes": format_euro(comision_ventas_mes, decimales=2),
         "alquileres_cobrados_mes": format_euro(alquileres_cobrados, decimales=2),

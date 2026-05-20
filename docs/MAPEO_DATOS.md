@@ -338,7 +338,7 @@ Vista agregada de operaciones futuras. Tres sub-secciones independientes
 ### Sub-sección · Pipeline de ventas (3 columnas)
 
 Operaciones de venta señalizadas pero aún no firmadas. Se reparten en 3 columnas
-(15 slots totales con `n_max=15`).
+(21 slots totales con `n_max=21`, la plantilla tiene `{{venta_pend_1..21_*}}`).
 
 **Filtro:**
 ```sql
@@ -362,7 +362,7 @@ para neutralizar duplicados puntuales detectados en P-19.
 | `ventas_pendientes` (lista) | VC | items `{nombre, importe}`; el nombre se muestra tal cual viene de BD (sin barra Unicode) | ✅ |
 | `total_ventas_pipeline` | derivado | `SUM(honorarios_totales)` del pipeline ventas | ✅ |
 
-Slots: `venta_pend_N_nombre` y `venta_pend_N_importe` (N=1..15) via `LIST_SPECS`.
+Slots: `venta_pend_N_nombre` y `venta_pend_N_importe` (N=1..21) via `LIST_SPECS`.
 
 ### Sub-sección · Pipeline de alquileres
 

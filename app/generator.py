@@ -63,7 +63,7 @@ LIST_SPECS = [
     {
         "key": "ventas_pendientes",
         "prefix": "venta_pend",
-        "n_max": 18,
+        "n_max": 21,
         "fields": ["nombre", "importe"],
     },
     {
