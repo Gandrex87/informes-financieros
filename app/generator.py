@@ -51,7 +51,7 @@ LIST_SPECS = [
     {
         "key": "operaciones_condicionadas",
         "prefix": "condicionada",
-        "n_max": 12,
+        "n_max": 22,
         "fields": ["nombre", "importe"],
     },
     {
@@ -70,7 +70,7 @@ LIST_SPECS = [
         # Reutiliza la lista del slide 4 con prefijo distinto para slide 5.
         "key": "pipeline_alquiler",
         "prefix": "venta_alq_pend",
-        "n_max": 6,
+        "n_max": 7,
         "fields": ["nombre", "importe"],
     },
     {

@@ -470,7 +470,7 @@ El color de `volumen_riesgo` se aplica via `_color_overrides` desde el calculato
 
 ### Tabla de operaciones condicionadas (lado derecho)
 
-Lista variable, una fila por operación. Slots `condicionada_N_nombre` + `condicionada_N_importe` con `n_max=12` via `LIST_SPECS`.
+Lista variable, una fila por operación. Slots `condicionada_N_nombre` + `condicionada_N_importe` (N=1..22) con `n_max=22` via `LIST_SPECS`. La plantilla tiene `{{condicionada_1..22_*}}`.
 
 **Filtro:**
 ```sql
