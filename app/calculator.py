@@ -108,6 +108,7 @@ from app.calculator_base import (
     _query_break_even,
     _query_cobros_pendientes,
     _query_comercial,
+    _query_comisiones_atrasos,
     _query_contable,
     _query_contratos_resumen,
     _query_tramo_comision,
@@ -150,10 +151,9 @@ OBJETIVO_RENTABILIDAD = "20 %"  # constante corporativa
 # Afecta a comision_variable_por_director = total_a_repartir / N_DIRECTORES.
 N_DIRECTORES = 2  # Valencia, constante provisional
 SUELDO_FIJO_DIRECTOR = Decimal("2666.67")  # bruto mensual por director, provisional
-# Subtotal de "COBRADO DE MESES ANTERIORES". Fuente real sin confirmar
-# (pendiente contabilidad, ver P-23). Hardcoded del mock para validar la
-# sumatoria de la zona inferior del slide 9.
-SUBTOTAL_COMISION_ATRASOS_PROVISIONAL = Decimal("1021.89")
+# "Cobrado de meses anteriores" (slide 9 Parte C): hasta 2026-05-21 era una
+# constante provisional (1021.89) hardcoded del mock. Ahora viene de
+# comisiones_atrasos_directores via _query_comisiones_atrasos. P-23 resuelto.
 
 # Slide 12 - constante provisional pendiente de confirmar con contabilidad.
 # (total_pendiente_cobro ya NO es provisional: deriva de pago_agentes,
@@ -198,10 +198,10 @@ def _narrativa_break_even(
     )
 
 
-def _query_alquileres_mes(anyo: int, mes: int) -> AlquilerMes:
-    """Lee de ventas_comerciales el resumen de alquileres de un mes.
+def _query_alquileres_mes(sede: str, anyo: int, mes: int) -> AlquilerMes:
+    """Lee de ventas_comerciales el resumen de alquileres de un mes para sede.
 
-    Filtro: inmueble LIKE 'ALQ.-%' (convencion de la ingesta).
+    Filtro: inmueble LIKE 'ALQ.-%' (convencion de la ingesta) + sede.
     Para alquileres, fecha_arras = fecha de firma del contrato.
     """
     schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
@@ -226,10 +226,11 @@ def _query_alquileres_mes(anyo: int, mes: int) -> AlquilerMes:
             AND arras_firmadas = 'SI'
             ) AS contratos_n_ops
         FROM {schema}.ventas_comerciales
-        WHERE inmueble LIKE 'ALQ.-%%';
+        WHERE sede = %(sede)s
+          AND inmueble LIKE 'ALQ.-%%';
     """
     with connection() as conn:
-        cur = conn.execute(sql, {"anyo": anyo, "mes": mes})
+        cur = conn.execute(sql, {"sede": sede, "anyo": anyo, "mes": mes})
         row = cur.fetchone()
     return AlquilerMes(
         señales_total=row["senales_total"],
@@ -239,7 +240,7 @@ def _query_alquileres_mes(anyo: int, mes: int) -> AlquilerMes:
     )
 
 
-def _query_pipeline_ventas() -> list[dict]:
+def _query_pipeline_ventas(sede: str) -> list[dict]:
     """Lista de ventas pendientes de firma (slide 5).
 
     Filtro:
@@ -261,14 +262,15 @@ def _query_pipeline_ventas() -> list[dict]:
         SELECT DISTINCT ON (inmueble, fecha_senal, honorarios_totales)
             inmueble, honorarios_totales
         FROM {schema}.ventas_comerciales
-        WHERE inmueble NOT LIKE 'ALQ.-%%'
+        WHERE sede = %(sede)s
+          AND inmueble NOT LIKE 'ALQ.-%%'
           AND arras_firmadas = 'NO'
           AND inmueble NOT ILIKE '%%victoria kent%%'
           AND inmueble NOT ILIKE 'urb.%%santa%%b_rbara%%'
         ORDER BY inmueble, fecha_senal, honorarios_totales, honorarios_totales DESC NULLS LAST;
     """
     with connection() as conn:
-        cur = conn.execute(sql)
+        cur = conn.execute(sql, {"sede": sede})
         rows = cur.fetchall()
     items = [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
     # DISTINCT ON requiere ORDER BY que empieza por las claves; reordenamos
@@ -277,7 +279,7 @@ def _query_pipeline_ventas() -> list[dict]:
     return items
 
 
-def _query_obra_nueva() -> list[dict]:
+def _query_obra_nueva(sede: str) -> list[dict]:
     """Operaciones de obra nueva agrupadas por promocion (slide 5).
 
     Detecta dos promociones conocidas:
@@ -302,7 +304,8 @@ def _query_obra_nueva() -> list[dict]:
             END AS promocion,
             COALESCE(SUM(honorarios_totales), 0) AS total_honorarios
         FROM {schema}.ventas_comerciales
-        WHERE (arras_firmadas IS DISTINCT FROM 'CAÍDA - 0')
+        WHERE sede = %(sede)s
+          AND (arras_firmadas IS DISTINCT FROM 'CAÍDA - 0')
           AND (
               inmueble ILIKE '%%victoria kent%%'
               OR inmueble ILIKE 'urb.%%santa%%b_rbara%%'
@@ -312,12 +315,12 @@ def _query_obra_nueva() -> list[dict]:
         ORDER BY total_honorarios DESC;
     """
     with connection() as conn:
-        cur = conn.execute(sql)
+        cur = conn.execute(sql, {"sede": sede})
         rows = cur.fetchall()
     return [{"nombre": r["promocion"], "honorarios": r["total_honorarios"]} for r in rows]
 
 
-def _query_operaciones_condicionadas() -> list[dict]:
+def _query_operaciones_condicionadas(sede: str) -> list[dict]:
     """Operaciones condicionadas vivas (slide 6).
 
     Filtro: pendiente_fecha_condicionada = TRUE.
@@ -333,16 +336,17 @@ def _query_operaciones_condicionadas() -> list[dict]:
     sql = f"""
         SELECT inmueble, honorarios_totales
         FROM {schema}.ventas_comerciales
-        WHERE pendiente_fecha_condicionada = TRUE
+        WHERE sede = %(sede)s
+          AND pendiente_fecha_condicionada = TRUE
         ORDER BY honorarios_totales DESC NULLS LAST;
     """
     with connection() as conn:
-        cur = conn.execute(sql)
+        cur = conn.execute(sql, {"sede": sede})
         rows = cur.fetchall()
     return [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
 
 
-def _query_pipeline_alquileres() -> list[dict]:
+def _query_pipeline_alquileres(sede: str) -> list[dict]:
     """Lista de alquileres con señal pero sin contrato firmado todavia.
 
     Excluimos:
@@ -356,13 +360,14 @@ def _query_pipeline_alquileres() -> list[dict]:
     sql = f"""
         SELECT inmueble, honorarios_totales
         FROM {schema}.ventas_comerciales
-        WHERE inmueble LIKE 'ALQ.-%%'
+        WHERE sede = %(sede)s
+          AND inmueble LIKE 'ALQ.-%%'
           AND fecha_senal IS NOT NULL
           AND (arras_firmadas IS NULL OR arras_firmadas NOT IN ('SI', 'CAÍDA - 0'))
         ORDER BY honorarios_totales DESC NULLS LAST;
     """
     with connection() as conn:
-        cur = conn.execute(sql)
+        cur = conn.execute(sql, {"sede": sede})
         rows = cur.fetchall()
     return [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
 
@@ -396,20 +401,20 @@ def build_payload_slide_2(
     contr_yoy = _query_contratos_resumen(anyo_yoy, mes_yoy)
 
     # Slide 4: alquileres
-    alq_actual = _query_alquileres_mes(anyo, mes)
-    alq_prev = _query_alquileres_mes(anyo_prev, mes_prev)
-    pipeline_alq_rows = _query_pipeline_alquileres()
+    alq_actual = _query_alquileres_mes(sede, anyo, mes)
+    alq_prev = _query_alquileres_mes(sede, anyo_prev, mes_prev)
+    pipeline_alq_rows = _query_pipeline_alquileres(sede)
     # Slide 4 - tarjeta Reservas/Señales: fuente = tabla resumen
     # resumen_mensual_alquiler_senales (NO ventas_comerciales).
     alq_sen_actual = _query_alquiler_senales_resumen(anyo, mes)
     alq_sen_prev = _query_alquiler_senales_resumen(anyo_prev, mes_prev)
 
     # Slide 5: pipeline Q2 (ventas + obra nueva)
-    pipeline_ventas_rows = _query_pipeline_ventas()
-    obra_nueva_rows = _query_obra_nueva()
+    pipeline_ventas_rows = _query_pipeline_ventas(sede)
+    obra_nueva_rows = _query_obra_nueva(sede)
 
     # Slide 6: operaciones condicionadas
-    condicionadas_rows = _query_operaciones_condicionadas()
+    condicionadas_rows = _query_operaciones_condicionadas(sede)
 
     # Slide 7: cobros pendientes de liquidacion
     cobros_pendientes_rows = _query_cobros_pendientes()
@@ -417,6 +422,8 @@ def build_payload_slide_2(
     # Slide 9: comisiones (zona "FIRMADO Y COBRADO EN <mes>")
     arras_cobradas = _query_arras_cobradas_mes(anyo, mes)
     alq_cobrados = _query_alquileres_cobrados_mes(anyo, mes)
+    # Slide 9 Parte C: COBRADO DE MESES ANTERIORES (foto viva, filtra por sede).
+    comisiones_atrasos_rows = _query_comisiones_atrasos(sede)
 
     # Slide 8: break even del mes (variante sin extras, mismo escenario)
     break_even_mes = _query_break_even(sede, escenario, anyo, mes)
@@ -574,9 +581,31 @@ def build_payload_slide_2(
     comision_alquileres_mes = alquileres_cobrados * tramo_comision_pct
     subtotal_comision_mes = comision_ventas_mes + comision_alquileres_mes
 
-    # Parte B: calculo final. subtotal_atrasos hoy es constante provisional
-    # (pendiente fuente real de "COBRADO DE MESES ANTERIORES", P-23).
-    subtotal_comision_atrasos = SUBTOTAL_COMISION_ATRASOS_PROVISIONAL
+    # Parte C: COBRADO DE MESES ANTERIORES (lista que se expande a slots
+    # comision_atraso_N_*). Antes era una constante provisional
+    # (SUBTOTAL_COMISION_ATRASOS_PROVISIONAL); ahora viene de
+    # comisiones_atrasos_directores. Resuelve P-23.
+    # Formato:
+    # - mes_origen en BD: '(Nov.)' -> mostrar sin parentesis: 'Nov.'
+    # - porcentaje en BD: 0.03 -> mostrar como '(3%)'
+    comisiones_atrasos = [
+        {
+            "nombre": row["inmueble"] or "",
+            "mes": (row["mes_origen"] or "").strip("()"),
+            "tramo": (
+                f"({int(row['porcentaje'] * 100)}%)"
+                if row["porcentaje"] is not None else ""
+            ),
+            "importe": format_euro(row["importe"], decimales=2),
+        }
+        for row in comisiones_atrasos_rows
+    ]
+    subtotal_comision_atrasos = sum(
+        (Decimal(str(row["importe"])) if row["importe"] else Decimal(0))
+        for row in comisiones_atrasos_rows
+    )
+
+    # Parte B: calculo final con el subtotal de atrasos ya real.
     total_comision_repartir = subtotal_comision_mes + subtotal_comision_atrasos
     comision_variable_por_director = total_comision_repartir / N_DIRECTORES
     total_por_director = comision_variable_por_director + SUELDO_FIJO_DIRECTOR
@@ -835,7 +864,11 @@ def build_payload_slide_2(
         "comision_alquileres_mes": format_euro(comision_alquileres_mes, decimales=2),
         "subtotal_comision_mes": format_euro(subtotal_comision_mes, decimales=2),
 
-        # Slide 9 Parte B: calculo final (subtotal_atrasos provisional)
+        # Slide 9 Parte C: lista de cobrados de meses anteriores
+        # (expand_lists -> comision_atraso_N_nombre/_mes/_tramo/_importe).
+        "comisiones_atrasos": comisiones_atrasos,
+
+        # Slide 9 Parte B: calculo final (subtotal_atrasos = SUM real de Parte C)
         "subtotal_comision_atrasos": format_euro(subtotal_comision_atrasos, decimales=2),
         "total_comision_repartir": format_euro(total_comision_repartir, decimales=2),
         "comision_variable_por_director": format_euro(comision_variable_por_director, decimales=2),

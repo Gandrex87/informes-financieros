@@ -686,7 +686,7 @@ en el mes) ✅, B (cálculo final) ✅, C (tabla de atrasos) ⏳ pendiente fuent
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `subtotal_comision_atrasos` | constante provisional | `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL = 1021.89`. Hardcoded del mock hasta confirmar fuente de la Parte C (P-23). | ⏳ provisional |
+| `subtotal_comision_atrasos` | derivado | `SUM(importe_comision)` de la lista `comisiones_atrasos` (Parte C). Antes era constante provisional; cerrado P-23 el 2026-05-21. | ✅ |
 | `total_comision_repartir` | derivado | `subtotal_comision_mes + subtotal_comision_atrasos` | ✅ |
 | `comision_variable_por_director` | derivado | `total_comision_repartir / N_DIRECTORES` (N=2) | ✅ |
 | `sueldo_fijo_director` | constante | `SUELDO_FIJO_DIRECTOR = 2666.67` (bruto mensual, provisional) | ⏳ provisional |
@@ -707,14 +707,24 @@ en el mes) ✅, B (cálculo final) ✅, C (tabla de atrasos) ⏳ pendiente fuent
 
 Buscar `PROVISIONAL` o `>>>` en el código localiza todos estos puntos.
 
-### Parte C — Tabla "COBRADO DE MESES ANTERIORES" ⏳
+### Parte C — Tabla "COBRADO DE MESES ANTERIORES" ✅ (2026-05-21)
+
+**Fuente**: `informes_financieros.comisiones_atrasos_directores`. Una fila
+por operación de un mes anterior cobrada en el mes actual, con su tramo
+histórico y el importe de comisión resultante. Filtrada por `sede` (la
+tabla tiene columna `sede`). Foto viva: sin filtro de `anyo/mes` — la
+tabla refleja los atrasos pendientes ahora; cuando se liquidan, la ingesta
+los retira.
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `comisiones_atrasos` (lista, `n_max=10`) | sin confirmar | Tabla de operaciones de meses anteriores cobradas este mes (nombre, mes origen, tramo, importe) | ⏳ pendiente fuente (P-23) |
+| `comisiones_atrasos` (lista, `n_max=7`) | `comisiones_atrasos_directores` | Items: `nombre=inmueble`, `mes=mes_origen.strip('()')` (ej. `(Nov.)` → `Nov.`), `tramo="({int(porcentaje*100)}%)"` (ej. `0.03` → `(3%)`), `importe=format_euro(importe_comision, 2)`. Ordenado por `importe DESC`. | ✅ |
+| `subtotal_comision_atrasos` | derivado | `SUM(importe_comision)` de las filas filtradas por sede. Alimenta el `total_comision_repartir` de la Parte B. | ✅ |
 
-Cuando se confirme la fuente, `subtotal_comision_atrasos` pasará a calcularse
-como la suma de esta lista en lugar de la constante provisional.
+Función: `_query_comisiones_atrasos(sede)` en `calculator_base.py`.
+
+`n_max=7` coincide con los slots reales de la plantilla
+(`comision_atraso_1..7_{nombre,mes,tramo,importe}`).
 
 ---
 

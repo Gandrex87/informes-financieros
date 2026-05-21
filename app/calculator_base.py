@@ -26,6 +26,12 @@ from app.db import connection
 
 logger = logging.getLogger(__name__)
 
+# Sedes validas. Las queries con filtro por sede validan contra este set para
+# fallar pronto ante una sede desconocida (evita queries sin resultados
+# silenciosas si llega un parametro mal escrito).
+SEDES_VALIDAS = {"Valencia", "Alicante"}
+
+
 # Mapeo numero de mes -> string usado en las tablas resumen_mensual_*.
 # Septiembre tiene dos variantes segun la tabla (ver _query_alquileres_cobrados_mes).
 _MES_LABEL_3 = ["", "ene", "feb", "mar", "abr", "may", "jun",
@@ -148,14 +154,16 @@ def _limpia_inmueble_alq(inmueble: str) -> str:
 
 
 # ----- Queries comunes (las usan todas las sedes) -----
-# TODO multi-sede: añadir filtro de sede en el SQL cuando Alicante tenga
-# datos en Postgres (otro Sheet -> otra tabla o columna `sede`).
+# Tabla ventas_comerciales unificada con columna sede (ver
+# docs/MIGRACION_MULTISEDE.md). Cada query filtra por sede.
 
 def _query_comercial(sede: str, anyo: int, mes: int) -> ComercialMes:
-    """Lee de ventas_comerciales el resumen comercial de un mes.
+    """Lee de ventas_comerciales el resumen comercial de un mes para una sede.
 
     Incluye VENTAS + ALQUILERES (la slide 1 dice "VENTAS Y ALQUILER").
     """
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
     schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
     sql = f"""
         SELECT
@@ -177,10 +185,11 @@ def _query_comercial(sede: str, anyo: int, mes: int) -> ComercialMes:
             AND fecha_arras < make_date(%(anyo)s, %(mes)s, 1) + INTERVAL '1 month'
             AND arras_firmadas = 'SI'
             ) AS arras_n_ops
-        FROM {schema}.ventas_comerciales;
+        FROM {schema}.ventas_comerciales
+        WHERE sede = %(sede)s;
     """
     with connection() as conn:
-        cur = conn.execute(sql, {"anyo": anyo, "mes": mes})
+        cur = conn.execute(sql, {"sede": sede, "anyo": anyo, "mes": mes})
         row = cur.fetchone()
     return ComercialMes(
         señales_total=row["senales_total"],
@@ -390,6 +399,44 @@ def _query_tramo_comision(anyo: int, mes: int) -> Decimal | None:
     if not row or row["n_dir"] == 0 or row["tramo"] is None:
         return None
     return row["tramo"]
+
+
+def _query_comisiones_atrasos(sede: str) -> list[dict]:
+    """Lista de COBRADO DE MESES ANTERIORES (slide 9 Parte C).
+
+    Fuente: informes_financieros.comisiones_atrasos_directores. Una fila
+    por operacion de un mes anterior cobrada este mes, con su tramo
+    historico (porcentaje aplicado) y el importe de comision resultante.
+
+    Estado vivo (sin filtro de anyo/mes): la tabla refleja la foto actual
+    de los atrasos pendientes. Cuando se liquidan, la ingesta los retira
+    o se sobreescriben. Filtro por sede para no mezclar Valencia/Alicante.
+
+    Resuelve P-23. Antes de tener esta tabla, subtotal_comision_atrasos era
+    una constante provisional (1021.89) hardcoded del mock.
+
+    Devuelve filas con keys: inmueble, mes_origen, porcentaje, importe.
+    """
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
+    schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
+    sql = f"""
+        SELECT inmueble, mes_origen, porcentaje, importe_comision
+        FROM {schema}.comisiones_atrasos_directores
+        WHERE sede = %(sede)s
+        ORDER BY importe_comision DESC NULLS LAST;
+    """
+    with connection() as conn:
+        rows = conn.execute(sql, {"sede": sede}).fetchall()
+    return [
+        {
+            "inmueble": r["inmueble"],
+            "mes_origen": r["mes_origen"],
+            "porcentaje": r["porcentaje"],
+            "importe": r["importe_comision"],
+        }
+        for r in rows
+    ]
 
 
 def _query_cobros_pendientes() -> list[dict]:

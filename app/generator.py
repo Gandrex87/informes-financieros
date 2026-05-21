@@ -52,7 +52,7 @@ LIST_SPECS = [
     {
         "key": "comisiones_atrasos",
         "prefix": "comision_atraso",
-        "n_max": 10,
+        "n_max": 7,
         "fields": ["nombre", "mes", "tramo", "importe"],
     },
     {

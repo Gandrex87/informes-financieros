@@ -222,11 +222,22 @@ La columna `pte_facturar` (TEXT) tiene valores residuales tipo `'0.2100000000000
 
 **Acción a futuro:** revisar la ingesta de `pago_agentes` para que no genere estos residuos (mantener decimales exactos / redondear en origen). Similar a P-19 (duplicados).
 
-### P-23 · Fuente de "COBRADO DE MESES ANTERIORES" (slide 9, Parte C)
+### P-23 · Fuente de "COBRADO DE MESES ANTERIORES" — ✅ CERRADO (2026-05-21)
 
-La tabla de atrasos del slide 9 (operaciones de meses anteriores cobradas este mes, con su tramo histórico) no tiene fuente confirmada. Hoy `subtotal_comision_atrasos` está hardcoded a `1021.89` (`SUBTOTAL_COMISION_ATRASOS_PROVISIONAL`) para validar la sumatoria de la zona inferior.
+**RESUELTO.** Contabilidad confirmó la fuente:
+`informes_financieros.comisiones_atrasos_directores` (columnas
+`inmueble`, `mes_origen`, `porcentaje`, `honorarios`, `importe_comision`,
+`sede`). Estado vivo (foto actual de atrasos pendientes de liquidar), sin
+filtro de anyo/mes. Implementado `_query_comisiones_atrasos(sede)` en
+`calculator_base`, lista `comisiones_atrasos` con formato del mock
+(mes sin paréntesis, tramo `(N%)`, importe con 2 decimales), y
+`subtotal_comision_atrasos = SUM(importe_comision)`. Eliminada la
+constante `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL`. `n_max` de la lista
+ajustado de 10 → 7 (slots reales en la plantilla).
 
-**Acción:** preguntar a contabilidad de dónde sale "Cobrado de meses anteriores". Cuando se confirme: implementar `_query_comisiones_atrasos()`, poblar la lista `comisiones_atrasos`, y calcular `subtotal_comision_atrasos` como su suma (en lugar de la constante).
+**Validación abril 2026 Valencia:** 5 filas, subtotal real
+`999,89 €` (vs `1021,89 €` provisional, ~2% de diferencia). Total por
+director pasó de 9.072,64 € → 9.061,64 €.
 
 ### P-22 · Tramo de comisión — ✅ CERRADO (2026-05-20)
 
