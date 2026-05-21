@@ -64,7 +64,15 @@ class AlquilerMes:
 
 @dataclass
 class ContableMes:
-    """Snapshot contable de un mes desde contabilidad_mensual."""
+    """Snapshot contable de un mes desde contabilidad_mensual.
+
+    Sobre ebitda/rentabilidad: la tabla tiene dos variantes.
+    - `_no_extras` / `_operativa_pct`: excluye gastos_extra (ingresos puros
+      de la operativa). Usado por Valencia en el slide 2 tarjeta 4.
+    - `_real` / `_real_pct`: incluye gastos_extra (resultado neto real).
+      Usado por Alicante en el slide 2 tarjeta 4 ("RENTABILIDAD REAL").
+    Ambas se exponen aqui; cada calculator decide cual mostrar.
+    """
     pagas_señales: Decimal | None
     arras_firmadas: Decimal | None
     ingresos_contables: Decimal | None
@@ -74,6 +82,8 @@ class ContableMes:
     rentabilidad_bruta_pct: Decimal | None
     ebitda_no_extras: Decimal | None
     rentabilidad_operativa_pct: Decimal | None
+    ebitda_real: Decimal | None
+    rentabilidad_real_pct: Decimal | None
 
 
 @dataclass
@@ -121,6 +131,33 @@ def _variacion(actual: Decimal | None, anterior: Decimal | None) -> Decimal | No
     if actual is None or anterior is None or anterior == 0:
         return None
     return (actual - anterior) / anterior
+
+
+def _variacion_tasa(actual: Decimal | None, anterior: Decimal | None) -> Decimal | None:
+    """Variacion porcentual entre dos TASAS (no importes), tolerando
+    denominador negativo.
+
+    Cuando se compara una tasa (rentabilidad, margen, etc.) y el mes anterior
+    fue negativo, la formula clasica (actual - anterior) / anterior invierte
+    el signo del resultado: una mejora (de -27% a +32%) sale como -216%,
+    comunicando lo contrario de la realidad.
+
+    Heuristica acordada (decision usuario 2026-05-21): cuando anterior < 0,
+    devolver abs(ratio) para que el signo refleje la direccion del cambio
+    (mejora = positivo, empeoramiento = negativo). Equivalente a calcular el
+    ratio contra |anterior|.
+
+    NO usar para comparar importes monetarios: ahi se usa _variacion clasica.
+    Esta funcion es especifica de comparaciones de tasas con posible
+    denominador negativo.
+    """
+    if actual is None or anterior is None or anterior == 0:
+        return None
+    ratio = (actual - anterior) / anterior
+    if anterior < 0:
+        # Reflejar la direccion real del cambio: si actual > anterior es mejora.
+        return abs(ratio) if actual > anterior else -abs(ratio)
+    return ratio
 
 
 def _clasifica_impacto(volumen_riesgo: Decimal | None) -> tuple[str, str]:
@@ -205,7 +242,8 @@ def _query_contable(sede: str, escenario: str, anyo: int, mes: int) -> ContableM
         SELECT "pagas_señales", arras_firmadas, ingresos_contables,
                honorarios_intermediacion, resto_ingresos,
                margen_bruto, rentabilidad_bruta_pct,
-               ebitda_no_extras, rentabilidad_operativa_pct
+               ebitda_no_extras, rentabilidad_operativa_pct,
+               ebitda_real, rentabilidad_real_pct
         FROM {schema}.contabilidad_mensual
         WHERE sede = %(sede)s AND escenario = %(escenario)s
           AND anyo = %(anyo)s AND mes = %(mes)s;
@@ -227,6 +265,8 @@ def _query_contable(sede: str, escenario: str, anyo: int, mes: int) -> ContableM
         rentabilidad_bruta_pct=row["rentabilidad_bruta_pct"],
         ebitda_no_extras=row["ebitda_no_extras"],
         rentabilidad_operativa_pct=row["rentabilidad_operativa_pct"],
+        ebitda_real=row["ebitda_real"],
+        rentabilidad_real_pct=row["rentabilidad_real_pct"],
     )
 
 
@@ -376,26 +416,39 @@ def _query_alquiler_senales_resumen(anyo: int, mes: int) -> ContratosResumenMes:
     )
 
 
-def _query_tramo_comision(anyo: int, mes: int) -> Decimal | None:
-    """Tramo de comision del mes = SUMA de porcentajes de los directores.
+def _query_tramo_comision(sede: str, anyo: int, mes: int) -> Decimal | None:
+    """Tramo de comision del mes y sede = SUMA de porcentajes de los directores.
 
-    Fuente: pagos_directores (una fila por director y mes). El tramo es
-    la suma de la columna `porcentaje` de todas las filas de ese
-    (anio, mes). Ej. abril: ALEX 0.0150 + FADIA 0.0150 = 0.0300 (3%).
+    Fuente: informes_financieros.pagos_directores (una fila por director,
+    mes y sede). El tramo es la suma de la columna `porcentaje` de las
+    filas de ese (sede, anio, mes). Ejemplos abril 2026:
+    - Valencia: ALEX 0.0150 + FADIA 0.0150 = 0.0300 (3%)
+    - Alicante: PELAYO 0.0400              = 0.0400 (4%)
 
     Funciona con N directores variable (no hay que tocar constantes si
     entra/sale un director: se refleja en las filas de la tabla).
-    Filtro mes = string 3 letras. Devuelve None si no hay filas.
+    Filtro mes = string 3 letras. Devuelve None si no hay filas para la
+    sede en ese mes.
+
+    Cambio 2026-05-21: la tabla se movio de finanzas_automation a
+    informes_financieros y gano columna `sede`.
     """
-    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
+    schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
     mes_label = _MES_LABEL_3[mes]
     sql = f"""
         SELECT SUM(porcentaje) AS tramo, COUNT(*) AS n_dir
         FROM {schema}.pagos_directores
-        WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+        WHERE sede = %(sede)s
+          AND anio = %(anyo)s
+          AND mes = %(mes_label)s;
     """
     with connection() as conn:
-        row = conn.execute(sql, {"anyo": anyo, "mes_label": mes_label}).fetchone()
+        row = conn.execute(
+            sql,
+            {"sede": sede, "anyo": anyo, "mes_label": mes_label},
+        ).fetchone()
     if not row or row["n_dir"] == 0 or row["tramo"] is None:
         return None
     return row["tramo"]

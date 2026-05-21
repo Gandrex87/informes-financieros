@@ -14,7 +14,11 @@
     "margen_20_estado": "verde",
     "margen_30_estado": "verde",
     "margen_40_estado": "rojo",
-    "margen_seguridad": "verde"
+    "margen_seguridad": "verde",
+
+    "var_contratos_mom_observacion": "amarillo",
+    "var_reservas_mom_observacion": "amarillo",
+    "total_pendiente_cobro_riesgo": "rojo"
   },
 
   "sede": "Alicante",
@@ -117,5 +121,27 @@
   "margen_30_estado": "✓ SUPERADO",
   "margen_40_estado": "FALTAN: 49.289 €",
   "margen_seguridad": "73.447 €",
-  "narrativa_break_even": "Los ingresos reales del mes (157.953 euros) han superado ampliamente el Break Even, consolidando un margen de seguridad en caja de:\n\nParalelamente, los 204.230 € firmados en arras garantizan nuestra facturación futura."
+  "narrativa_break_even": "Los ingresos reales del mes (157.953 euros) han superado ampliamente el Break Even, consolidando un margen de seguridad en caja de:\n\nParalelamente, los 204.230 € firmados en arras garantizan nuestra facturación futura.",
+
+  "var_contratos_mom_observacion": "+149,0 %",
+  "var_reservas_mom_observacion": "+16,2 %",
+  "total_pendiente_cobro": "90.120 €",
+  "total_pendiente_cobro_riesgo": "90.120 €",
+
+  "mes_siguiente_upper_solo": "MAYO",
+  "facturacion_objetivo_proy": "160.000 €",
+  "break_even_proy": "98.274 €",
+  "margen_10_objetivo_proy": "117.929 €",
+  "margen_20_objetivo_proy": "147.411 €",
+  "margen_30_objetivo_proy": "196.548 €",
+  "break_even_estado_proy": "SUPERVIVENCIA",
+  "margen_10_estado_proy": "OBJETIVO",
+  "margen_20_estado_proy": "ÓPTIMO",
+  "margen_30_estado_proy": "EXCELENCIA",
+
+  "mes_siguiente_upper": "MAYO 2026",
+  "mes_capitalizado": "Abril",
+  "volumen_riesgo": "0 €",
+  "n_ops_condicionadas": "0",
+  "n_ops_pipeline": "5"
 }

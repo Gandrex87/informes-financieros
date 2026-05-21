@@ -569,11 +569,11 @@ def build_payload_slide_2(
     # directores del mes en pagos_directores (ej. abril: 0.015+0.015=0.03).
     # Si falta el dato fallamos explicito en lugar de generar un PDF con
     # comision 0 silenciosa (leccion P-27: dato faltante de ingesta).
-    tramo_comision_pct = _query_tramo_comision(anyo, mes)
+    tramo_comision_pct = _query_tramo_comision(sede, anyo, mes)
     if tramo_comision_pct is None:
         raise ValueError(
             f"No hay tramo de comision en pagos_directores para "
-            f"{anyo}-{mes:02d}. Carga primero pagos_directores."
+            f"sede={sede} {anyo}-{mes:02d}. Carga primero pagos_directores."
         )
     ventas_cobradas = arras_cobradas if arras_cobradas is not None else Decimal(0)
     alquileres_cobrados = alq_cobrados if alq_cobrados is not None else Decimal(0)

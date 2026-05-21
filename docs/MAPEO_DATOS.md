@@ -17,7 +17,7 @@ Este documento sirve a la vez como:
 | **RM-arras** | tabla `finanzas_automation.resumen_mensual_arras` (totales mensuales de ventas, 2025+2026) |
 | **RM-alq** | tabla `finanzas_automation.resumen_mensual_alquileres` (totales mensuales de alquileres cobrados, solo 2026) |
 | **RM-alq-señales** | tabla `finanzas_automation.resumen_mensual_alquiler_senales` (señales/reservas de alquiler por mes, solo 2026) |
-| **PD** | tabla `finanzas_automation.pagos_directores` (1 fila por director y mes; alimenta el tramo de comisión dinámico) |
+| **PD** | tabla `informes_financieros.pagos_directores` (1 fila por director, mes y sede; alimenta el tramo de comisión dinámico). Movida desde `finanzas_automation` el 2026-05-21 y añadida columna `sede`. |
 | **constante** | valor hardcodeado en código (a mover a `parametros_sede_mes` cuando varíe por sede o mes) |
 | **derivado** | calculado por Python a partir de otros datos |
 | **manual** | aún no integrado; viene del cliente (n8n o JSON mock) |
@@ -54,7 +54,7 @@ el informe de marzo 2026 en septiembre, estos datos serán **los de marzo**:
 | **Señales de alquiler del mes** (importe + nº ops, slide 4 tarjeta Reservas) | `resumen_mensual_alquiler_senales` | **Cambio 2026-05-20:** ya NO desde `ventas_comerciales`; viene de tabla resumen. |
 | Comisiones cobradas del mes (ventas y alquileres, slide 9) | `resumen_mensual_arras__sin_condicion`, `resumen_mensual_alquileres` | Tablas resumen mensual, una fila por mes |
 | Reservas del mes (señales sumadas de ventas+alquileres) | `ventas_comerciales` filtrado por `fecha_senal` en el mes | El filtro es por fecha del evento, que no cambia |
-| **Tramo de comisión del mes** (slide 1 y 9) | `pagos_directores` (suma de `porcentaje` del mes) | **Cambio 2026-05-20:** ya NO es constante `0.03` hardcoded; se lee dinámicamente. |
+| **Tramo de comisión del mes** (slide 1 y 9) | `informes_financieros.pagos_directores` (suma de `porcentaje` filtrado por `(sede, anyo, mes)`) | **2026-05-20:** ya NO es constante `0.03` hardcoded; se lee dinámicamente. **2026-05-21:** tabla movida a schema `informes_financieros` y añadido filtro por sede. Valencia abril `'3 %'`, Alicante abril `'4 %'`. |
 | Comparativas MoM / YoY | derivadas de los anteriores | Cálculo relativo al mes pedido |
 
 ### 🔴 Datos de ESTADO VIVO — reflejan la foto de HOY, NO del mes pedido
@@ -104,7 +104,7 @@ KPIs principales y identificación del informe.
 | `reservas_totales` | VC | `SUM(honorarios_totales) WHERE fecha_senal en el mes` | ⚠️ ver P-18 |
 | `contratos_firmados` | RM-arras + RM-alq | **Suma** de `resumen_mensual_arras.honorarios` + `resumen_mensual_alquileres.honorarios_cobrados` para `(anio, mes)`. Abril 2026: 483.327 + 22.075 = **505.402 €**. Función `_query_contratos_resumen`. | ✅ |
 | `ingresos_totales` | CM | `ingresos_contables` | ✅ |
-| `tramo_comision` | PD | **Dinámico:** `SUM(porcentaje)` de `pagos_directores` para `(anio, mes)`. Abril 2026: ALEX 0,015 + FADIA 0,015 = `"3 %"`. Función `_query_tramo_comision`. Funciona con N directores variables sin tocar código. Resuelve P-22. | ✅ |
+| `tramo_comision` | PD | **Dinámico:** `SUM(porcentaje)` de `informes_financieros.pagos_directores` para `(sede, anio, mes)`. Abril 2026: Valencia (ALEX 0,015 + FADIA 0,015) = `"3 %"`; Alicante (PELAYO 0,04) = `"4 %"`. Función `_query_tramo_comision(sede, anyo, mes)`. Funciona con N directores variables sin tocar código. Resuelve P-22. | ✅ |
 
 ---
 
@@ -670,7 +670,7 @@ en el mes) ✅, B (cálculo final) ✅, C (tabla de atrasos) ⏳ pendiente fuent
 |---|---|---|---|
 | `mes_informe_upper` | derivado | `format_mes_upper(mes)` → `"ABRIL"` (mes en mayúsculas sin año). Usado en "FIRMADO Y COBRADO EN ABRIL". | ✅ |
 | `ingresos_totales` | CM | (heredado del slide 2) — banner superior | ✅ |
-| `tramo_comision` | PD | **Dinámico (2026-05-20):** `SUM(porcentaje)` de `pagos_directores` para `(anio, mes)`. Mismo token que slide 1. Si no hay filas → `ValueError` explícito (lección P-27: nunca generar PDF con comisión 0 silenciosa). Resuelve P-22. | ✅ |
+| `tramo_comision` | PD | **Dinámico (2026-05-20, schema actualizado 2026-05-21):** `SUM(porcentaje)` de `informes_financieros.pagos_directores` para `(sede, anio, mes)`. Mismo token que slide 1. Si no hay filas → `ValueError` explícito (lección P-27: nunca generar PDF con comisión 0 silenciosa). Resuelve P-22. | ✅ |
 
 ### Parte A — Firmado y cobrado en el mes ✅
 
