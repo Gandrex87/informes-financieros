@@ -155,7 +155,7 @@ def generate_report(
     data: dict,
     slides_client,
     drive_client,
-    template_id: str | None = None,
+    template_id: str,
     folder_id: str | None = None,
     copy_name_prefix: str = "_tmp_informe",
 ) -> bytes:
@@ -164,7 +164,11 @@ def generate_report(
     Args:
         data: dict con todos los tokens (keys planas + listas a expandir).
         slides_client, drive_client: clientes ya autenticados.
-        template_id: ID del Slides plantilla. Si None, lee SLIDES_TEMPLATE_ID.
+        template_id: ID del Slides plantilla. OBLIGATORIO desde 2026-05-22:
+            el caller resuelve el template via `calculator.template_id_for(sede)`
+            o lo pasa explicito. Antes habia un fallback a SLIDES_TEMPLATE_ID
+            generico que asumia Valencia y servia la plantilla equivocada a
+            Alicante.
         folder_id: ID carpeta destino en Drive. Si None o vacio, raiz de Mi unidad.
         copy_name_prefix: prefijo del nombre de la copia intermedia.
 
@@ -173,8 +177,12 @@ def generate_report(
 
     Raises:
         GenerationError: si algo falla con las APIs de Google.
+        ValueError: si template_id viene vacio.
     """
-    template_id = template_id or os.environ["SLIDES_TEMPLATE_ID"]
+    if not template_id:
+        raise ValueError(
+            "template_id es obligatorio. Usa calculator.template_id_for(sede)."
+        )
     folder_id = folder_id if folder_id is not None else os.environ.get("DRIVE_FOLDER_ID", "").strip()
 
     # Extraer overrides de color y datos de graficos (no son tokens

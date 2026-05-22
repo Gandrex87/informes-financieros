@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
 from app.auth import build_clients  # noqa: E402
-from app.calculator import build_payload_slide_2  # noqa: E402
+from app.calculator import build_payload, template_id_for  # noqa: E402
+from app.calculator_base import SEDES_VALIDAS  # noqa: E402
 from app.generator import GenerationError, generate_report  # noqa: E402
 from app.schemas import (  # noqa: E402
     GenerarDesdeDBRequest,
@@ -102,7 +103,15 @@ def _safe_filename(sede: str, mes_año: str) -> str:
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    template_id = os.environ.get("SLIDES_TEMPLATE_ID", "")
+    # Lista de templates configurados por sede. Si una sede no tiene su
+    # SLIDES_TEMPLATE_ID_<SEDE> en .env, queda fuera del mapa (no rompe).
+    templates: dict[str, str] = {}
+    for sede in SEDES_VALIDAS:
+        try:
+            templates[sede] = template_id_for(sede)
+        except RuntimeError:
+            # Sede sin template configurado: la omitimos en /health.
+            continue
     user_email = None
     try:
         _slides, drive = get_google_clients()
@@ -110,7 +119,7 @@ def health():
         user_email = about.get("user", {}).get("emailAddress")
     except HttpError as e:
         logger.warning("No se pudo leer about: %s", e)
-    return HealthResponse(status="ok", template_id=template_id, user_email=user_email)
+    return HealthResponse(status="ok", templates=templates, user_email=user_email)
 
 
 @app.post("/generar-informe", dependencies=[Depends(require_api_key)])
@@ -118,13 +127,21 @@ def generar_informe(req: GenerarInformeRequest):
     """Genera el informe y devuelve el PDF binario.
 
     Recibe el payload completo de tokens (mock / cliente externo lo compone).
+    La sede del payload determina la plantilla a usar.
     """
+    try:
+        template_id = template_id_for(req.sede)
+    except (ValueError, RuntimeError) as e:
+        logger.warning("Plantilla no disponible para sede %r: %s", req.sede, e)
+        raise HTTPException(status_code=400, detail=str(e))
+
     try:
         slides_client, drive_client = get_google_clients()
         pdf_bytes = generate_report(
             data=req.to_data_dict(),
             slides_client=slides_client,
             drive_client=drive_client,
+            template_id=template_id,
         )
     except GenerationError as e:
         logger.exception("Error generando informe")
@@ -142,18 +159,24 @@ def generar_informe(req: GenerarInformeRequest):
 def generar_desde_db(req: GenerarDesdeDBRequest):
     """Genera el informe leyendo los datos directamente de Postgres.
 
-    Cobertura actual: slides 1 y 2. Resto de slides quedaran con
-    tokens {{xxx}} sin reemplazar hasta que se amplie el calculator.
+    El dispatcher selecciona el calculator y la plantilla segun la sede.
     """
     try:
-        payload = build_payload_slide_2(
+        template_id = template_id_for(req.sede)
+    except (ValueError, RuntimeError) as e:
+        logger.warning("Plantilla no disponible para sede %r: %s", req.sede, e)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        payload = build_payload(
             sede=req.sede,
             anyo=req.anyo,
             mes=req.mes,
             escenario=req.escenario,
         )
     except ValueError as e:
-        # Datos faltantes en Postgres (ej. no hay contabilidad cargada).
+        # Datos faltantes en Postgres (ej. no hay contabilidad cargada) o
+        # sede invalida.
         logger.warning("Datos insuficientes: %s", e)
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -166,6 +189,7 @@ def generar_desde_db(req: GenerarDesdeDBRequest):
             data=payload,
             slides_client=slides_client,
             drive_client=drive_client,
+            template_id=template_id,
         )
     except GenerationError as e:
         logger.exception("Error generando informe")

@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
-from app.calculator import build_payload_slide_2
+from app.calculator import build_payload
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -33,7 +33,7 @@ def main() -> int:
     anyo = int(sys.argv[2])
     mes = int(sys.argv[3])
 
-    payload = build_payload_slide_2(sede, anyo, mes)
+    payload = build_payload(sede, anyo, mes)
 
     print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
 

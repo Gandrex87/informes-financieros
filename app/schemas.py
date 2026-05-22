@@ -40,7 +40,10 @@ class GenerarInformeRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
-    template_id: str
+    templates: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapa de sede -> Slides template ID. Hay un template por sede.",
+    )
     user_email: str | None = None
 
 

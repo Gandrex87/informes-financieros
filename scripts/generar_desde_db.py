@@ -19,7 +19,7 @@ load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
 from app.auth import build_clients
-from app.calculator import build_payload_slide_2
+from app.calculator import build_payload, template_id_for
 from app.generator import GenerationError, generate_report
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -35,15 +35,16 @@ def main() -> int:
     anyo = int(sys.argv[2])
     mes = int(sys.argv[3])
 
-    print(f"Generando informe slides 1+2 para {sede} {anyo}-{mes:02d}...")
+    print(f"Generando informe para {sede} {anyo}-{mes:02d}...")
     print(f"Leyendo datos de Postgres via calculator...")
-    payload = build_payload_slide_2(sede, anyo, mes)
+    payload = build_payload(sede, anyo, mes)
     print(f"  {len(payload)} campos calculados (excluye _color_overrides).")
 
+    template_id = template_id_for(sede)
     slides, drive = build_clients(ROOT)
-    print("Generando PDF...")
+    print(f"Generando PDF con template {template_id}...")
     try:
-        pdf_bytes = generate_report(payload, slides, drive)
+        pdf_bytes = generate_report(payload, slides, drive, template_id=template_id)
     except GenerationError as e:
         print(f"ERROR: {e}")
         return 1

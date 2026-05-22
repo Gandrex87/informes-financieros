@@ -245,7 +245,7 @@ concreta se mueve a su `calculator_<sede>.py`.
         mientras la ingesta de `comisiones_atrasos_directores` carga
         sede='Alicante'.
 
-### Arquitectura del calculator multi-sede — Opción B (APLICADA PARCIAL)
+### Arquitectura del calculator multi-sede — Opción B (✅ APLICADA 2026-05-22)
 
 **Decisión final:** dispatcher + un calculator por sede. NO un único calculator
 con `if sede ==` (Opción A) ni con `SedeConfig` paramétrico (Opción C).
@@ -254,26 +254,43 @@ con `if sede ==` (Opción A) ni con `SedeConfig` paramétrico (Opción C).
 plantilla distinta, distinto conjunto de productos). Una `SedeConfig` no modela
 bien diferencias de **estructura del informe**.
 
+**Detonante del refactor:** al desplegar Alicante en producción se descubrió
+que el endpoint `/generar-desde-db` usaba siempre `SLIDES_TEMPLATE_ID`
+hardcoded (la plantilla de Valencia con 12 slides) y `build_payload_slide_2`
+del calculator de Valencia, aunque la petición trajera `sede="Alicante"`.
+Resultado: PDF con plantilla de Valencia y datos de Alicante. Forzó completar
+el refactor (que estaba en espera).
+
 **Estado actual (2026-05-22):**
 - `app/calculator_base.py` — queries comunes parametrizadas por `sede` +
   helpers + dataclasses. Cada query valida `sede in SEDES_VALIDAS`.
-- `app/calculator.py` — calculator de Valencia (sigue llamándose así, no
-  `calculator_valencia.py`). Función entrada `build_payload_slide_2(sede,
-  anyo, mes, escenario)`.
+- `app/calculator.py` — **DISPATCHER**. Funciones:
+  - `build_payload(sede, anyo, mes, escenario)` despacha a
+    `calculator_valencia.build_payload(...)` o
+    `calculator_alicante.build_payload(...)` según sede.
+  - `template_id_for(sede)` lee `SLIDES_TEMPLATE_ID_<SEDE>` del entorno y
+    devuelve el ID de la plantilla a usar.
+- `app/calculator_valencia.py` — calculator de Valencia (antes vivía en
+  `calculator.py`). Función entrada `build_payload(sede, anyo, mes, escenario)`.
 - `app/calculator_alicante.py` — calculator de Alicante. Función entrada
   `build_payload(anyo, mes, escenario)` (sin parámetro `sede`, es constante
   `SEDE = "Alicante"`).
-- **NO HAY DISPATCHER aún**: cada caller (script o endpoint) elige
-  directamente el calculator. `scripts/generar_desde_db.py` →
-  `calculator.build_payload_slide_2` (Valencia). `scripts/generar_alicante_desde_db.py`
-  → `calculator_alicante.build_payload` (Alicante). Para el endpoint
-  `/generar-desde-db` solo Valencia está conectado; Alicante hoy solo se
-  genera vía script CLI o `/generar-informe` con payload completo.
 
-**Refactor pendiente (no urgente):** renombrar `calculator.py` →
-`calculator_valencia.py` y crear `calculator.py` nuevo como dispatcher.
-Mecánico (~30 min con tests). Sin presión hoy: cada script apunta a su
-calculator directamente y funciona.
+**Variables de entorno** (cambio breaking en `.env`):
+- ❌ Eliminada: `SLIDES_TEMPLATE_ID`.
+- ✅ Nuevas: `SLIDES_TEMPLATE_ID_VALENCIA`, `SLIDES_TEMPLATE_ID_ALICANTE`.
+- Si una sede pide su plantilla y la env var no existe → `RuntimeError`
+  explícito en lugar de generar un PDF con plantilla equivocada.
+
+**Endpoints actualizados:**
+- `GET /health` → devuelve `{templates: {Valencia: ..., Alicante: ...}, user_email: ...}`.
+- `POST /generar-informe` y `POST /generar-desde-db` → resuelven el template
+  por sede vía `template_id_for(sede)` y pasan `template_id` explícito a
+  `generate_report`. Antes el fallback genérico era Valencia siempre.
+
+**`generate_report` (app/generator.py):** `template_id` ahora es
+**obligatorio** (antes era `Optional` con fallback a env). Cualquier caller
+debe resolver el template antes de invocar `generate_report`.
 
 ## Riesgo del orden de aplicación (en migraciones futuras)
 

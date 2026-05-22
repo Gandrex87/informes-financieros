@@ -46,7 +46,7 @@ sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
 from app.auth import build_clients  # noqa: E402
-from app.calculator import build_payload_slide_2  # noqa: E402
+from app.calculator import build_payload, template_id_for  # noqa: E402
 from app.formatter import format_euro  # noqa: E402
 from app.generator import generate_report  # noqa: E402
 
@@ -69,7 +69,7 @@ def main() -> int:
     print(f"=== Simulacion break even: {sede} {anyo}-{mes:02d} con ingresos = {ingresos_sim} EUR ===")
     print(f"Leyendo payload real de Postgres...")
 
-    payload = build_payload_slide_2(sede, anyo, mes)
+    payload = build_payload(sede, anyo, mes)
 
     # Anclas de valor (vienen del calculator como Decimal) para recalculo
     be = payload["_break_even_position"]["break_even"]
@@ -118,8 +118,9 @@ def main() -> int:
 
     # 6) Generar PDF
     print("Llamando a Slides API...")
+    template_id = template_id_for(sede)
     slides_c, drive_c = build_clients(ROOT)
-    pdf_bytes = generate_report(payload, slides_c, drive_c)
+    pdf_bytes = generate_report(payload, slides_c, drive_c, template_id=template_id)
 
     # Nombre con el ingreso simulado, no pisa nada
     importe_str = str(int(ingresos_sim)).replace(".", "")

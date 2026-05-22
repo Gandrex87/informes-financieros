@@ -41,11 +41,11 @@ from app.calculator_base import (
     _variacion,
     _variacion_tasa,
 )
-# Narrativa templating determinista del slide 6 (Break Even). Hoy vive en
-# calculator.py (Valencia); la reutilizamos tal cual aunque el "importe base"
+# Narrativa templating determinista del slide 6 (Break Even). Vive en
+# calculator_valencia.py; la reutilizamos tal cual aunque el "importe base"
 # de Alicante sea arras_firmadas y no facturacion_cobrada (decision usuario
 # 2026-05-22: comunicar mal este matiz es aceptable hoy, se ajusta si chirria).
-from app.calculator import _narrativa_break_even
+from app.calculator_valencia import _narrativa_break_even
 from app.formatter import (
     format_delta_ops_full,
     format_euro,
