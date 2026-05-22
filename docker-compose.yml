@@ -14,7 +14,10 @@ services:
       # OAuth: solo rollback de emergencia (si AUTH_METHOD=oauth).
       OAUTH_CLIENT_FILE: credentials/oauth_client.json
       OAUTH_TOKEN_FILE: credentials/token.json
-      SLIDES_TEMPLATE_ID: ${SLIDES_TEMPLATE_ID}
+      # Plantillas Slides por sede (refactor 2026-05-22). La variable
+      # generica SLIDES_TEMPLATE_ID se eliminó: cada sede tiene la suya.
+      SLIDES_TEMPLATE_ID_VALENCIA: ${SLIDES_TEMPLATE_ID_VALENCIA}
+      SLIDES_TEMPLATE_ID_ALICANTE: ${SLIDES_TEMPLATE_ID_ALICANTE}
       DRIVE_FOLDER_ID: ${DRIVE_FOLDER_ID:-}
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
