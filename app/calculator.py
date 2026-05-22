@@ -111,6 +111,8 @@ from app.calculator_base import (
     _query_comisiones_atrasos,
     _query_contable,
     _query_contratos_resumen,
+    _query_pipeline_alquileres,
+    _query_pipeline_ventas,
     _query_tramo_comision,
     _variacion,
 )
@@ -155,6 +157,17 @@ SUELDO_FIJO_DIRECTOR = Decimal("2666.67")  # bruto mensual por director, provisi
 # constante provisional (1021.89) hardcoded del mock. Ahora viene de
 # comisiones_atrasos_directores via _query_comisiones_atrasos. P-23 resuelto.
 
+# Slide 5 - patrones ILIKE de inmuebles a EXCLUIR del pipeline de ventas.
+# Son las 2 promociones de obra nueva de Valencia, que tienen su seccion
+# aparte en el slide. Alicante no tiene obra nueva -> en su calculator no
+# pasa exclusiones (default () de _query_pipeline_ventas). Cuando se migre
+# a la tabla `promociones_obra_nueva` (decision arquitectonica pendiente
+# en MAPEO_DATOS.md), esta constante desaparece.
+PROMOCIONES_OBRA_NUEVA_EXCLUIR: tuple[str, ...] = (
+    "%victoria kent%",
+    "urb.%santa%b_rbara%",
+)
+
 # Slide 12 - constante provisional pendiente de confirmar con contabilidad.
 # (total_pendiente_cobro ya NO es provisional: deriva de pago_agentes,
 #  igual que slide 7).
@@ -171,17 +184,25 @@ def _narrativa_break_even(
     Decision de diseño del proyecto: narrativa por plantilla en Python, NO
     LLM (la consistencia importa mas que la variedad en un documento
     financiero). Tres ramas segun la relacion facturacion/break even.
+
+    NOTA importante (2026-05-22): la narrativa NO menciona el importe del
+    margen de seguridad ni el del deficit. Razon: ese importe aparece en
+    una caja propia del slide (`{{margen_seguridad}}`) con color override
+    condicional. Si la narrativa lo contuviera como subcadena,
+    apply_color_overrides pintaria la caja de la narrativa entera del
+    mismo color (ver feedback_color_caja_unica en memoria). Solo se
+    mencionan facturacion e importe del break even (que no llevan color
+    override).
     """
     if ingresos is None or break_even is None or margen_seguridad is None:
         return ""
     fact = format_euro(ingresos)
     be = format_euro(break_even)
     if margen_seguridad > 0:
-        ms = format_euro(margen_seguridad)
         return (
             f"La facturación cobrada ({fact}) supera el punto de equilibrio "
-            f"({be}), con un margen de seguridad de {ms}. La operación es "
-            f"rentable este mes; el excedente sobre el break even amortigua "
+            f"({be}), generando un margen de seguridad relevante. La operación "
+            f"es rentable este mes; el excedente sobre el break even amortigua "
             f"posibles desviaciones."
         )
     if margen_seguridad == 0:
@@ -190,11 +211,10 @@ def _narrativa_break_even(
             f"equilibrio ({be}). No hay margen de seguridad: cualquier "
             f"desviación negativa llevaría el mes a pérdidas."
         )
-    deficit = format_euro(-margen_seguridad)
     return (
         f"La facturación cobrada ({fact}) NO alcanza el punto de equilibrio "
-        f"({be}); faltan {deficit} para cubrir la estructura de costes. El "
-        f"mes cierra por debajo del break even."
+        f"({be}); el mes cierra por debajo del break even, sin margen de "
+        f"seguridad."
     )
 
 
@@ -238,45 +258,6 @@ def _query_alquileres_mes(sede: str, anyo: int, mes: int) -> AlquilerMes:
         contratos_total=row["contratos_total"],
         contratos_n_ops=row["contratos_n_ops"],
     )
-
-
-def _query_pipeline_ventas(sede: str) -> list[dict]:
-    """Lista de ventas pendientes de firma (slide 5).
-
-    Filtro:
-    - Es venta (no alquiler): inmueble NOT LIKE 'ALQ.-%'.
-    - Pendiente: arras_firmadas = 'NO'.
-    - Excluimos las 2 promociones de obra nueva conocidas (van a su seccion aparte).
-
-    NO excluimos todo 'urb.%' porque hay ventas normales con ese prefijo
-    (ej. 'Urb. Loma de Caballeros 3'). Solo excluimos las promociones
-    de obra nueva explicitas.
-
-    DISTINCT defensivo por (inmueble, fecha_senal, honorarios_totales) para
-    neutralizar duplicados puntuales detectados en P-19.
-
-    Ordenado por honorarios descendente.
-    """
-    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
-    sql = f"""
-        SELECT DISTINCT ON (inmueble, fecha_senal, honorarios_totales)
-            inmueble, honorarios_totales
-        FROM {schema}.ventas_comerciales
-        WHERE sede = %(sede)s
-          AND inmueble NOT LIKE 'ALQ.-%%'
-          AND arras_firmadas = 'NO'
-          AND inmueble NOT ILIKE '%%victoria kent%%'
-          AND inmueble NOT ILIKE 'urb.%%santa%%b_rbara%%'
-        ORDER BY inmueble, fecha_senal, honorarios_totales, honorarios_totales DESC NULLS LAST;
-    """
-    with connection() as conn:
-        cur = conn.execute(sql, {"sede": sede})
-        rows = cur.fetchall()
-    items = [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
-    # DISTINCT ON requiere ORDER BY que empieza por las claves; reordenamos
-    # despues por importe para presentacion.
-    items.sort(key=lambda r: r["honorarios"] or 0, reverse=True)
-    return items
 
 
 def _query_obra_nueva(sede: str) -> list[dict]:
@@ -346,32 +327,6 @@ def _query_operaciones_condicionadas(sede: str) -> list[dict]:
     return [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
 
 
-def _query_pipeline_alquileres(sede: str) -> list[dict]:
-    """Lista de alquileres con señal pero sin contrato firmado todavia.
-
-    Excluimos:
-    - Las firmadas ('SI').
-    - Las caidas ('CAÍDA - 0', con tilde en la I).
-
-    Sin filtro de mes: incluye señalizaciones de meses anteriores que aun
-    no han firmado. Ordenado por honorarios descendente.
-    """
-    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
-    sql = f"""
-        SELECT inmueble, honorarios_totales
-        FROM {schema}.ventas_comerciales
-        WHERE sede = %(sede)s
-          AND inmueble LIKE 'ALQ.-%%'
-          AND fecha_senal IS NOT NULL
-          AND (arras_firmadas IS NULL OR arras_firmadas NOT IN ('SI', 'CAÍDA - 0'))
-        ORDER BY honorarios_totales DESC NULLS LAST;
-    """
-    with connection() as conn:
-        cur = conn.execute(sql, {"sede": sede})
-        rows = cur.fetchall()
-    return [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
-
-
 def build_payload_slide_2(
     sede: str,
     anyo: int,
@@ -396,9 +351,9 @@ def build_payload_slide_2(
 
     # Contratos firmados (slide 1/2 y derivados): suma de las tablas
     # resumen mensual (ventas + alquileres), NO ventas_comerciales.
-    contr_actual = _query_contratos_resumen(anyo, mes)
-    contr_prev = _query_contratos_resumen(anyo_prev, mes_prev)
-    contr_yoy = _query_contratos_resumen(anyo_yoy, mes_yoy)
+    contr_actual = _query_contratos_resumen(sede, anyo, mes)
+    contr_prev = _query_contratos_resumen(sede, anyo_prev, mes_prev)
+    contr_yoy = _query_contratos_resumen(sede, anyo_yoy, mes_yoy)
 
     # Slide 4: alquileres
     alq_actual = _query_alquileres_mes(sede, anyo, mes)
@@ -406,22 +361,23 @@ def build_payload_slide_2(
     pipeline_alq_rows = _query_pipeline_alquileres(sede)
     # Slide 4 - tarjeta Reservas/Señales: fuente = tabla resumen
     # resumen_mensual_alquiler_senales (NO ventas_comerciales).
-    alq_sen_actual = _query_alquiler_senales_resumen(anyo, mes)
-    alq_sen_prev = _query_alquiler_senales_resumen(anyo_prev, mes_prev)
+    alq_sen_actual = _query_alquiler_senales_resumen(sede, anyo, mes)
+    alq_sen_prev = _query_alquiler_senales_resumen(sede, anyo_prev, mes_prev)
 
-    # Slide 5: pipeline Q2 (ventas + obra nueva)
-    pipeline_ventas_rows = _query_pipeline_ventas(sede)
+    # Slide 5: pipeline Q2 (ventas + obra nueva). En Valencia excluimos las
+    # 2 promociones de obra nueva del pipeline de ventas (van a su seccion).
+    pipeline_ventas_rows = _query_pipeline_ventas(sede, PROMOCIONES_OBRA_NUEVA_EXCLUIR)
     obra_nueva_rows = _query_obra_nueva(sede)
 
     # Slide 6: operaciones condicionadas
     condicionadas_rows = _query_operaciones_condicionadas(sede)
 
     # Slide 7: cobros pendientes de liquidacion
-    cobros_pendientes_rows = _query_cobros_pendientes()
+    cobros_pendientes_rows = _query_cobros_pendientes(sede)
 
     # Slide 9: comisiones (zona "FIRMADO Y COBRADO EN <mes>")
-    arras_cobradas = _query_arras_cobradas_mes(anyo, mes)
-    alq_cobrados = _query_alquileres_cobrados_mes(anyo, mes)
+    arras_cobradas = _query_arras_cobradas_mes(sede, anyo, mes)
+    alq_cobrados = _query_alquileres_cobrados_mes(sede, anyo, mes)
     # Slide 9 Parte C: COBRADO DE MESES ANTERIORES (foto viva, filtra por sede).
     comisiones_atrasos_rows = _query_comisiones_atrasos(sede)
 
@@ -685,6 +641,23 @@ def build_payload_slide_2(
     # saldria en verde, comunicando lo contrario de la realidad.
     if margen_seguridad is not None:
         color_overrides["margen_seguridad"] = "verde" if margen_seguridad >= 0 else "rojo"
+    # Slide 8: color de los 5 estados (columna ESTADO de la tabla de la
+    # derecha). "✓ SUPERADO" -> verde; "FALTAN: <X> €" -> rojo. Sin estos
+    # overrides los colores son fijos en plantilla (verde/rojo hardcoded
+    # para abril 2026) y engañan en otros meses donde el estado cambie.
+    # Solo coloreamos los *_estado, no los importes: los tokens de
+    # importe (break_even, margen_N_objetivo) tambien aparecen en la
+    # barra/linea de tiempo de la izquierda, y pintarla cambiaria su
+    # significado visual.
+    for _tok, _umbral in (
+        ("break_even_estado", be_break_even),
+        ("margen_10_estado", be_m10),
+        ("margen_20_estado", be_m20),
+        ("margen_30_estado", be_m30),
+        ("margen_40_estado", be_m40),
+    ):
+        if ingresos_be is not None and _umbral is not None:
+            color_overrides[_tok] = "verde" if ingresos_be >= _umbral else "rojo"
     # Slide 11: mismos criterios que slide 6 para version compacta
     color_overrides["volumen_riesgo_short"] = impacto_color
     # Slide 11: rentabilidad operativa con signo, verde si supera el objetivo

@@ -67,6 +67,35 @@ def format_pct_signed(value: Number, decimales: int = 2) -> str:
     return signed + _fmt_pct(d, decimales)
 
 
+def format_pct_signed_compacto(value: Number, decimales_max: int = 1) -> str:
+    """Formato compacto: hasta `decimales_max` decimales, omite ',0...' cuando
+    el valor es entero al redondear.
+
+    Ejemplos con decimales_max=1:
+        0.139  -> '+13,9 %'
+        0.201  -> '+20,1 %'
+        2.0102 -> '+201 %'      (201,0 -> entero, omite el ',0')
+        2.0156 -> '+201,6 %'    (mantiene 1 decimal porque no es entero)
+        -0.06  -> '-6 %'        (-6,0 -> entero, omite el ',0')
+        -0.061 -> '-6,1 %'
+
+    Diferencia con format_pct_signed: este SIEMPRE muestra los decimales
+    pedidos (formato fijo). Compacto los omite cuando son todos cero, mas
+    cercano al estilo del PDF manual de Alicante. Usado para variaciones
+    MoM del slide 2 (decision 2026-05-22).
+    """
+    d = _to_decimal(value)
+    if d is None:
+        return ""
+    d = d * 100
+    signed = "+" if d >= 0 else ""
+    # Redondeamos a decimales_max y vemos si la parte fraccional resulta cero.
+    redondeado = d.quantize(Decimal(10) ** -decimales_max)
+    if redondeado == redondeado.to_integral_value():
+        return signed + _fmt_pct(redondeado, 0)
+    return signed + _fmt_pct(redondeado, decimales_max)
+
+
 def format_int_signed(value: Number, suffix: str = "") -> str:
     """Convierte 3 -> '+3', -18 -> '-18'. Con suffix opcional: '+3 ops'."""
     d = _to_decimal(value)

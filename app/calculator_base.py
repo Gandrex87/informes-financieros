@@ -1,21 +1,19 @@
 """
 Base común del calculator — sede-agnóstico.
 
-Contiene lo que comparten TODAS las sedes (hoy Valencia, futuro Alicante):
+Contiene lo que comparten TODAS las sedes (Valencia y Alicante):
 - Dataclasses de filas de BD.
 - Helpers puros (aritmética de fechas, variaciones, clasificación).
-- Queries genéricas a Postgres que no dependen del informe de una sede
-  concreta.
+- Queries genéricas a Postgres que reciben `sede` como parametro y filtran
+  con `WHERE sede = %(sede)s`. `SEDES_VALIDAS` valida el parametro pronto.
 
 NO contiene el ensamblaje del payload (eso es específico de cada sede:
-calculator_valencia.py, calculator_alicante.py) ni constantes de negocio
-de una sede (nº directores, tramo comisión, etc.).
+calculator.py / calculator_valencia.py, calculator_alicante.py) ni
+constantes de negocio de una sede (nº directores, sueldo fijo, etc.).
 
-NOTA sobre filtro de sede: las queries comerciales/contables hoy NO filtran
-por sede en el SQL (solo hay datos de Valencia en Postgres). Cuando se
-integre Alicante (otro Sheet, otra tabla o columna `sede`), habrá que
-añadir el filtro real. Marcado con TODO. Extracción mecánica: el
-comportamiento es idéntico al calculator.py monolítico anterior.
+Estado multi-sede (2026-05-22): todas las tablas usadas por las queries de
+este modulo tienen columna `sede` y viven en `informes_financieros` salvo
+`ventas_comerciales` (en `finanzas_automation`). Ver docs/MIGRACION_MULTISEDE.md.
 """
 import logging
 import os
@@ -301,61 +299,80 @@ def _query_break_even(sede: str, escenario: str, anyo: int, mes: int) -> BreakEv
     )
 
 
-def _query_arras_cobradas_mes(anyo: int, mes: int) -> Decimal | None:
-    """Lee resumen_mensual_arras__sin_condicion.cobradas para un mes.
+def _query_arras_cobradas_mes(sede: str, anyo: int, mes: int) -> Decimal | None:
+    """Lee resumen_mensual_arras__sin_condicion.cobradas para una sede y mes.
 
-    Es la base de calculo de la comision de ventas del slide 9.
-    Filtro por anio + mes (string 3 letras, ej. 'abr'). Solo Valencia.
+    Es la base de calculo de la comision de ventas del slide 9. Filtro
+    por (sede, anio, mes string 3 letras, ej. 'abr').
+
+    Cambio 2026-05-22: tabla movida a schema informes_financieros y añadida
+    columna sede.
     """
-    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
+    schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
     mes_label = _MES_LABEL_3[mes]
     sql = f"""
         SELECT cobradas
         FROM {schema}.resumen_mensual_arras__sin_condicion
-        WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+        WHERE sede = %(sede)s
+          AND anio = %(anyo)s
+          AND mes = %(mes_label)s;
     """
     with connection() as conn:
-        cur = conn.execute(sql, {"anyo": anyo, "mes_label": mes_label})
+        cur = conn.execute(sql, {"sede": sede, "anyo": anyo, "mes_label": mes_label})
         row = cur.fetchone()
     return row["cobradas"] if row else None
 
 
-def _query_alquileres_cobrados_mes(anyo: int, mes: int) -> Decimal | None:
-    """Lee resumen_mensual_alquileres.honorarios_cobrados para un mes.
+def _query_alquileres_cobrados_mes(sede: str, anyo: int, mes: int) -> Decimal | None:
+    """Lee resumen_mensual_alquileres.honorarios_cobrados para una sede y mes.
 
     Base de calculo de la comision de alquileres del slide 9.
     OJO: esta tabla usa 'sept' (4 letras) para septiembre, distinto a
     resumen_mensual_arras__sin_condicion que usa 'sep'. Para mes != 9
     el label de 3 letras funciona en ambas.
+
+    Cambio 2026-05-22: tabla movida a schema informes_financieros y añadida
+    columna sede.
     """
-    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
+    schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
     mes_label = "sept" if mes == 9 else _MES_LABEL_3[mes]
     sql = f"""
         SELECT honorarios_cobrados
         FROM {schema}.resumen_mensual_alquileres
-        WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+        WHERE sede = %(sede)s
+          AND anio = %(anyo)s
+          AND mes = %(mes_label)s;
     """
     with connection() as conn:
-        cur = conn.execute(sql, {"anyo": anyo, "mes_label": mes_label})
+        cur = conn.execute(sql, {"sede": sede, "anyo": anyo, "mes_label": mes_label})
         row = cur.fetchone()
     return row["honorarios_cobrados"] if row else None
 
 
-def _query_contratos_resumen(anyo: int, mes: int) -> ContratosResumenMes:
-    """Contratos firmados de un mes = ventas + alquileres (tablas resumen).
+def _query_contratos_resumen(sede: str, anyo: int, mes: int) -> ContratosResumenMes:
+    """Contratos firmados de una sede y mes = ventas + alquileres.
 
     Suma:
     - resumen_mensual_arras.honorarios + num_operaciones (ventas)
     - resumen_mensual_alquileres.honorarios_cobrados + num_operaciones (alq.)
 
     Fuente del token contratos_firmados (slide 1 y 2) y derivados
-    (var MoM/YoY, ticket medio, gráfico slide 3). Filtro anio + mes
-    (string 3 letras). resumen_mensual_arras tiene 2025 y 2026.
+    (var MoM/YoY, ticket medio, gráfico slide 3). Filtro (sede, anio, mes
+    string 3 letras). resumen_mensual_arras tiene 2025 y 2026.
 
     OJO septiembre: resumen_mensual_alquileres usa 'sept' (4 letras),
     resumen_mensual_arras usa 'sep' (3 letras). Se resuelve por tabla.
+
+    Cambio 2026-05-22: ambas tablas en informes_financieros con columna
+    sede. Filtro homogeneo.
     """
-    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
+    schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
     label_3 = _MES_LABEL_3[mes]
     label_alq = "sept" if mes == 9 else label_3
     with connection() as conn:
@@ -363,17 +380,21 @@ def _query_contratos_resumen(anyo: int, mes: int) -> ContratosResumenMes:
             f"""
             SELECT honorarios, num_operaciones
             FROM {schema}.resumen_mensual_arras
-            WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+            WHERE sede = %(sede)s
+              AND anio = %(anyo)s
+              AND mes = %(mes_label)s;
             """,
-            {"anyo": anyo, "mes_label": label_3},
+            {"sede": sede, "anyo": anyo, "mes_label": label_3},
         ).fetchone()
         al = conn.execute(
             f"""
             SELECT honorarios_cobrados, num_operaciones
             FROM {schema}.resumen_mensual_alquileres
-            WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+            WHERE sede = %(sede)s
+              AND anio = %(anyo)s
+              AND mes = %(mes_label)s;
             """,
-            {"anyo": anyo, "mes_label": label_alq},
+            {"sede": sede, "anyo": anyo, "mes_label": label_alq},
         ).fetchone()
 
     ar_hon = ar["honorarios"] if ar and ar["honorarios"] is not None else None
@@ -390,24 +411,31 @@ def _query_contratos_resumen(anyo: int, mes: int) -> ContratosResumenMes:
     return ContratosResumenMes(honorarios=honorarios, num_operaciones=n_ops)
 
 
-def _query_alquiler_senales_resumen(anyo: int, mes: int) -> ContratosResumenMes:
-    """Señales de alquiler de un mes desde resumen_mensual_alquiler_senales.
+def _query_alquiler_senales_resumen(sede: str, anyo: int, mes: int) -> ContratosResumenMes:
+    """Señales de alquiler de una sede y mes desde resumen_mensual_alquiler_senales.
 
     Fuente de la tarjeta Reservas/Señales del slide 4 (reservas_alquiler
-    y derivados: var MoM, n_ops, delta). Filtro anio + mes (string 3
+    y derivados: var MoM, n_ops, delta). Filtro (sede, anio, mes string 3
     letras). OJO septiembre: esta tabla usa 'sept' (4 letras).
+
+    Cambio 2026-05-22: tabla movida a schema informes_financieros y añadida
+    columna sede.
 
     Reutiliza ContratosResumenMes (honorarios + num_operaciones).
     """
-    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
+    schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
     mes_label = "sept" if mes == 9 else _MES_LABEL_3[mes]
     sql = f"""
         SELECT honorarios_cobrados, num_operaciones
         FROM {schema}.resumen_mensual_alquiler_senales
-        WHERE anio = %(anyo)s AND mes = %(mes_label)s;
+        WHERE sede = %(sede)s
+          AND anio = %(anyo)s
+          AND mes = %(mes_label)s;
     """
     with connection() as conn:
-        row = conn.execute(sql, {"anyo": anyo, "mes_label": mes_label}).fetchone()
+        row = conn.execute(sql, {"sede": sede, "anyo": anyo, "mes_label": mes_label}).fetchone()
     if not row:
         return ContratosResumenMes(honorarios=None, num_operaciones=0)
     return ContratosResumenMes(
@@ -454,6 +482,90 @@ def _query_tramo_comision(sede: str, anyo: int, mes: int) -> Decimal | None:
     return row["tramo"]
 
 
+def _query_pipeline_ventas(
+    sede: str,
+    inmuebles_excluir_ilike: tuple[str, ...] = (),
+) -> list[dict]:
+    """Lista de ventas pendientes de firma para una sede.
+
+    Filtro:
+    - sede = sede pedida.
+    - Es venta (no alquiler): inmueble NOT LIKE 'ALQ.-%'.
+    - Pendiente: arras_firmadas = 'NO'.
+    - Excluye los inmuebles que matcheen alguno de los patrones en
+      `inmuebles_excluir_ilike` (ej. promociones de obra nueva en Valencia,
+      que tienen su seccion aparte). Patrones pasados como parametros
+      bindeados (no f-string), seguro frente a SQL injection.
+
+    DISTINCT ON defensivo por (inmueble, fecha_senal, honorarios_totales)
+    para neutralizar duplicados puntuales detectados en P-19.
+
+    Ordenado por honorarios descendente. Cada sede decide su lista de
+    exclusiones en su calculator (default () = sin exclusiones, como
+    Alicante que no tiene obra nueva).
+    """
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    # Construye las clausulas NOT ILIKE dinamicamente con parametros
+    # bindeados, una por patron de exclusion.
+    excl_sql = " ".join(
+        f"AND inmueble NOT ILIKE %(excl_{i})s"
+        for i in range(len(inmuebles_excluir_ilike))
+    )
+    sql = f"""
+        SELECT DISTINCT ON (inmueble, fecha_senal, honorarios_totales)
+            inmueble, honorarios_totales
+        FROM {schema}.ventas_comerciales
+        WHERE sede = %(sede)s
+          AND inmueble NOT LIKE 'ALQ.-%%'
+          AND arras_firmadas = 'NO'
+          {excl_sql}
+        ORDER BY inmueble, fecha_senal, honorarios_totales, honorarios_totales DESC NULLS LAST;
+    """
+    params: dict[str, object] = {"sede": sede}
+    for i, patron in enumerate(inmuebles_excluir_ilike):
+        params[f"excl_{i}"] = patron
+    with connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    items = [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
+    # DISTINCT ON requiere ORDER BY que empieza por las claves; reordenamos
+    # despues por importe para presentacion.
+    items.sort(key=lambda r: r["honorarios"] or 0, reverse=True)
+    return items
+
+
+def _query_pipeline_alquileres(sede: str) -> list[dict]:
+    """Lista de alquileres con señal pero sin contrato firmado todavia.
+
+    Excluimos:
+    - Las firmadas ('SI').
+    - Las caidas ('CAÍDA - 0', con tilde en la I).
+
+    Sin filtro de mes: incluye señalizaciones de meses anteriores que aun
+    no han firmado. Ordenado por honorarios descendente.
+
+    Filtro semantico universal (LIKE 'ALQ.-%') por convencion de la
+    ingesta. Funciona para cualquier sede que tenga alquileres; las que
+    no los tengan recibiran lista vacia.
+    """
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
+    schema = os.environ["POSTGRES_SCHEMA_VENTAS"]
+    sql = f"""
+        SELECT inmueble, honorarios_totales
+        FROM {schema}.ventas_comerciales
+        WHERE sede = %(sede)s
+          AND inmueble LIKE 'ALQ.-%%'
+          AND fecha_senal IS NOT NULL
+          AND (arras_firmadas IS NULL OR arras_firmadas NOT IN ('SI', 'CAÍDA - 0'))
+        ORDER BY honorarios_totales DESC NULLS LAST;
+    """
+    with connection() as conn:
+        rows = conn.execute(sql, {"sede": sede}).fetchall()
+    return [{"inmueble": r["inmueble"], "honorarios": r["honorarios_totales"]} for r in rows]
+
+
 def _query_comisiones_atrasos(sede: str) -> list[dict]:
     """Lista de COBRADO DE MESES ANTERIORES (slide 9 Parte C).
 
@@ -492,13 +604,14 @@ def _query_comisiones_atrasos(sede: str) -> list[dict]:
     ]
 
 
-def _query_cobros_pendientes() -> list[dict]:
-    """Cobros pendientes de liquidacion (slide 7).
+def _query_cobros_pendientes(sede: str) -> list[dict]:
+    """Cobros pendientes de liquidacion para una sede (slide 7).
 
     Fuente: informes_financieros.pago_agentes, columna pte_facturar (TEXT).
     pte_facturar puede ser: 'CAÍDA', '0', o un numero > 0 (lo pendiente).
 
     Filtro:
+    - sede = sede pedida (columna añadida 2026-05-21).
     - Solo strings numericos puros (descarta 'CAÍDA').
     - Valor > 1 para descartar basura de coma flotante de la ingesta
       (ej. '0.21000000000003638' que es ruido, no un cobro real). Ver P-24.
@@ -513,16 +626,19 @@ def _query_cobros_pendientes() -> list[dict]:
 
     Ordenado por importe descendente.
     """
+    if sede not in SEDES_VALIDAS:
+        raise ValueError(f"Sede invalida: {sede!r}. Esperado uno de {SEDES_VALIDAS}.")
     schema = os.environ["POSTGRES_SCHEMA_INFORMES"]
     sql = f"""
         SELECT inmueble, CAST(pte_facturar AS NUMERIC) AS importe
         FROM {schema}.pago_agentes
-        WHERE pte_facturar ~ '^[0-9]+\\.?[0-9]*$'
+        WHERE sede = %(sede)s
+          AND pte_facturar ~ '^[0-9]+\\.?[0-9]*$'
           AND CAST(pte_facturar AS NUMERIC) > 1
           AND fecha_arras_sin_condic IS NOT NULL
         ORDER BY importe DESC;
     """
     with connection() as conn:
-        cur = conn.execute(sql)
+        cur = conn.execute(sql, {"sede": sede})
         rows = cur.fetchall()
     return [{"inmueble": r["inmueble"], "importe": r["importe"]} for r in rows]

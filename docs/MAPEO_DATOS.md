@@ -8,15 +8,24 @@ Este documento sirve a la vez como:
 - Referencia para validación con contabilidad ("¿de dónde sale tal cifra?").
 - Trazabilidad histórica si cambian las fuentes.
 
+> **Alcance:** este documento describe el informe de **Valencia** (12 slides).
+> Las diferencias estructurales del informe de **Alicante** (10 slides, sin
+> alquileres ni obra nueva ni operaciones condicionadas, rentabilidad real en
+> vez de operativa, 1 director) están documentadas en
+> `docs/MIGRACION_MULTISEDE.md` y en
+> `memory/project_diferencias_valencia_alicante.md`. Para añadir una sede
+> nueva (ej. Castellón) seguir la guía al final de `MIGRACION_MULTISEDE.md`.
+
 ## Convenciones
 
 | Etiqueta | Significa |
 |---|---|
 | **VC** | tabla `finanzas_automation.ventas_comerciales` (datos crudos, una fila por operación) |
 | **CM** | tabla `informes_financieros.contabilidad_mensual` (snapshot mensual del Sheet contable) |
-| **RM-arras** | tabla `finanzas_automation.resumen_mensual_arras` (totales mensuales de ventas, 2025+2026) |
-| **RM-alq** | tabla `finanzas_automation.resumen_mensual_alquileres` (totales mensuales de alquileres cobrados, solo 2026) |
-| **RM-alq-señales** | tabla `finanzas_automation.resumen_mensual_alquiler_senales` (señales/reservas de alquiler por mes, solo 2026) |
+| **RM-arras** | tabla `informes_financieros.resumen_mensual_arras` (totales mensuales de ventas, 2025+2026; columna `sede`). Movida desde `finanzas_automation` el 2026-05-22 con `sede`. |
+| **RM-arras-sin-condic** | tabla `informes_financieros.resumen_mensual_arras__sin_condicion` (cobradas del mes, slide 9 Parte A; columna `sede`). Movida desde `finanzas_automation` el 2026-05-22 con `sede`. |
+| **RM-alq** | tabla `informes_financieros.resumen_mensual_alquileres` (totales mensuales de alquileres cobrados; columna `sede`). Movida desde `finanzas_automation` el 2026-05-22 con `sede`. |
+| **RM-alq-señales** | tabla `informes_financieros.resumen_mensual_alquiler_senales` (señales/reservas de alquiler por mes; columna `sede`). Movida desde `finanzas_automation` el 2026-05-22 con `sede`. |
 | **PD** | tabla `informes_financieros.pagos_directores` (1 fila por director, mes y sede; alimenta el tramo de comisión dinámico). Movida desde `finanzas_automation` el 2026-05-21 y añadida columna `sede`. |
 | **constante** | valor hardcodeado en código (a mover a `parametros_sede_mes` cuando varíe por sede o mes) |
 | **derivado** | calculado por Python a partir de otros datos |
@@ -314,10 +323,16 @@ Operaciones de alquiler que se han señalizado pero aún no han firmado contrato
 
 **Filtro:**
 ```sql
-WHERE inmueble LIKE 'ALQ.-%'
+WHERE sede = %(sede)s                    -- multi-sede
+  AND inmueble LIKE 'ALQ.-%'
   AND fecha_senal IS NOT NULL
   AND (arras_firmadas IS NULL OR arras_firmadas NOT IN ('SI', 'CAÍDA - 0'))
 ```
+
+**Función**: `_query_pipeline_alquileres(sede)` en `calculator_base.py`
+(movida desde calculator.py el 2026-05-21). Filtro semántico universal
+`LIKE 'ALQ.-%'` por convención de la ingesta — funciona para cualquier
+sede con alquileres; sedes sin alquileres reciben lista vacía.
 
 Exclusiones explícitas:
 - `'SI'`: ya firmadas (no son pendiente).
@@ -361,11 +376,26 @@ Operaciones de venta señalizadas pero aún no firmadas. Se reparten en 3 column
 
 **Filtro:**
 ```sql
-WHERE inmueble NOT LIKE 'ALQ.-%'         -- no alquileres
+WHERE sede = %(sede)s                    -- multi-sede (Valencia o Alicante)
+  AND inmueble NOT LIKE 'ALQ.-%'         -- no alquileres
   AND arras_firmadas = 'NO'              -- pendiente
-  AND inmueble NOT ILIKE '%victoria kent%'           -- excluye obra nueva
-  AND inmueble NOT ILIKE 'urb.%santa%b_rbara%'       -- excluye obra nueva
+  -- Exclusiones específicas por sede vienen parametrizadas (ver abajo):
+  AND inmueble NOT ILIKE '%victoria kent%'           -- Valencia: obra nueva
+  AND inmueble NOT ILIKE 'urb.%santa%b_rbara%'       -- Valencia: obra nueva
 ```
+
+**Función**: `_query_pipeline_ventas(sede, inmuebles_excluir_ilike)` en
+`calculator_base.py` (movida desde calculator.py el 2026-05-21 para que la
+use también Alicante). Las exclusiones se pasan como parámetros bindeados
+(no f-string, seguro contra SQL injection):
+
+- **Valencia** pasa `PROMOCIONES_OBRA_NUEVA_EXCLUIR = ("%victoria kent%",
+  "urb.%santa%b_rbara%")` desde `calculator.py`.
+- **Alicante** no pasa nada (default `()`) porque no tiene obra nueva.
+
+Cuando se migre a la decisión arquitectónica pendiente (tabla
+`promociones_obra_nueva`), la constante de Valencia desaparece y el
+filtro se carga dinámicamente de la tabla.
 
 **Importante sobre el filtro:** NO excluimos `inmueble ILIKE 'urb.%'` genérico
 porque hay ventas normales con ese prefijo (ej. `Urb. Loma de Caballeros 3`).
@@ -606,7 +636,7 @@ tokens son **reutilizados** de slides anteriores (el calculator ya los emite).
 
 | Token | Fuente | Cálculo / nota | Estado |
 |---|---|---|---|
-| `total_pendiente_cobro` | derivado (pago_agentes) | **Ya NO es provisional.** `SUM` de los cobros pendientes del slide 7 (`informes_financieros.pago_agentes`, mismo filtro: `pte_facturar` numérico puro y `> 1`), formateado con `€`. El slide 7 emite el mismo número sin `€` (`total_pendiente_cobro_sin_euro`). | ✅ |
+| `total_pendiente_cobro` | derivado (pago_agentes) | **Ya NO es provisional.** `SUM` de los cobros pendientes del slide 7 (`informes_financieros.pago_agentes`, mismo filtro: `sede`, `pte_facturar` numérico puro `> 1`, `fecha_arras_sin_condic IS NOT NULL`), formateado con `€`. El slide 7 emite el mismo número sin `€` (`total_pendiente_cobro_sin_euro`). | ✅ |
 | `trimestre` | derivado | (ver slide 5) — usado en "Objetivo: Maximizar liquidez en Q2" | ✅ |
 
 **Tarjeta 2 — Blindaje de operaciones:**
@@ -698,12 +728,15 @@ en el mes) ✅, B (cálculo final) ✅, C (tabla de atrasos) ⏳ pendiente fuent
 |---|---|
 | `N_DIRECTORES` | entre o salga un director (marcado con `>>> ... <<<` en código) |
 | `SUELDO_FIJO_DIRECTOR` | cambie el sueldo fijo bruto |
-| `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL` | se confirme la fuente de "COBRADO DE MESES ANTERIORES" (P-23) |
 
-> `TRAMO_COMISION_PCT` y `TRAMO_COMISION_LABEL` **ya no existen** en el código.
-> El tramo se calcula dinámicamente desde `pagos_directores` (`_query_tramo_comision`).
-> Para cambiar el porcentaje hoy: editar las filas de `pagos_directores` del mes
-> correspondiente. P-22 resuelto.
+> **Constantes eliminadas:**
+> - `TRAMO_COMISION_PCT` / `TRAMO_COMISION_LABEL` (P-22 resuelto): el tramo
+>   se calcula dinámicamente desde `pagos_directores` vía
+>   `_query_tramo_comision`. Para cambiarlo, editar las filas de
+>   `pagos_directores` del mes correspondiente.
+> - `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL` (P-23 resuelto): el subtotal
+>   se calcula dinámicamente desde `comisiones_atrasos_directores` vía
+>   `_query_comisiones_atrasos`.
 
 Buscar `PROVISIONAL` o `>>>` en el código localiza todos estos puntos.
 
@@ -742,11 +775,16 @@ Valores posibles: `'CAÍDA'`, `'0'`, o un número `> 0` (lo pendiente).
 
 **Filtro:**
 ```sql
-WHERE pte_facturar ~ '^[0-9]+\.?[0-9]*$'   -- numérico puro (descarta 'CAÍDA')
+WHERE sede = %(sede)s                      -- multi-sede (añadido 2026-05-21)
+  AND pte_facturar ~ '^[0-9]+\.?[0-9]*$'   -- numérico puro (descarta 'CAÍDA')
   AND CAST(pte_facturar AS NUMERIC) > 1     -- umbral anti-basura-float (P-24)
   AND fecha_arras_sin_condic IS NOT NULL    -- excluye 'PONER FECHA' (2026-05-19)
 ORDER BY importe DESC
 ```
+
+**Función**: `_query_cobros_pendientes(sede)`. La tabla `pago_agentes`
+ganó columna `sede` el 2026-05-21 y desde entonces se filtra por sede
+en la query. Tiene filas para Valencia y Alicante.
 
 El umbral `> 1` descarta basura de coma flotante de la ingesta
 (`'0.21000000000003638'` y similares). Ver P-24.
@@ -810,7 +848,9 @@ query `_query_break_even(sede, escenario, anyo, mes)`.
 | `margen_N_estado` | derivado | (mismo patrón para cada margen 10/20/30/40) | ✅ |
 | `narrativa_break_even` | derivado | **Plantilla determinista** (NO LLM) en `_narrativa_break_even`. 3 ramas según el signo de `margen_seguridad`: supera / iguala exactamente / déficit. Cada rama tiene texto propio. | ✅ |
 
-### Color condicional `margen_seguridad`
+### Colores condicionales del slide 8
+
+`margen_seguridad`:
 
 | Condición | Color |
 |---|---|
@@ -819,6 +859,25 @@ query `_query_break_even(sede, escenario, anyo, mes)`.
 
 Sin este override, el token estaba en verde fijo en la plantilla → un déficit
 saldría en verde, comunicando lo contrario de la realidad.
+
+`break_even_estado`, `margen_10_estado`, `margen_20_estado`,
+`margen_30_estado`, `margen_40_estado` (2026-05-22):
+
+| Condición | Color |
+|---|---|
+| `ingresos_contables ≥ umbral` (texto `"✓ SUPERADO"`) | verde |
+| `ingresos_contables < umbral` (texto `"FALTAN: <X> €"`) | rojo |
+
+Sin estos overrides, los colores eran fijos en plantilla (verde para BE/m10/m20,
+rojo para m30/m40 — coloreado a mano para abril 2026 de Valencia). Era engañoso
+en otros meses o sedes donde el estado cambia.
+
+**Solo coloreamos los `*_estado`, no los importes** (`break_even`,
+`margen_N_objetivo`): esos tokens también aparecen en la barra/línea de tiempo
+de la izquierda. Pintarlos cambiaría el color de los hitos de la barra y
+comunicaría algo distinto. Si en un mes hay 3 estados con texto idéntico
+(`"✓ SUPERADO"`), el override por valor de texto los pinta los 3
+correctamente (mismo color → mismo resultado, sin colisión).
 
 ### Posicionamiento dinámico del marcador ✅ (2026-05-20)
 
@@ -912,12 +971,15 @@ Valores que hoy están fijos en código pero deberían ser parámetros por sede/
 |---|---|---|
 | `OBJETIVO_RENTABILIDAD` | `"20 %"` | Puede variar por sede o cambiar anualmente |
 | `INVERSION_TECNOLOGICA_PROVISIONAL` | `"27k€"` | Origen sin confirmar (P-21) |
-| `N_DIRECTORES` | `2` | Si entra/sale un director (slide 9 reparto) |
-| `SUELDO_FIJO_DIRECTOR` | `2666.67 €` | Si cambia el sueldo bruto |
-| `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL` | `1021.89 €` | Cuando llegue la fuente real (P-23) |
+| `N_DIRECTORES` | `2` (Valencia) / `1` (Alicante) | Si entra/sale un director (slide 9 reparto). Vive en cada calculator. |
+| `SUELDO_FIJO_DIRECTOR` | `2.666,67 €` (Valencia) / `1.933,73 €` (Alicante) | Si cambia el sueldo bruto. Vive en cada calculator. |
+| `PROMOCIONES_OBRA_NUEVA_EXCLUIR` | `('%victoria kent%', 'urb.%santa%b_rbara%')` (Valencia) | Cuando entre una promoción nueva. Decisión pendiente: migrar a tabla `promociones_obra_nueva`. |
 
-> `TRAMO_COMISION_PCT/LABEL` **ya no están** en esta lista: se resolvieron
-> 2026-05-20 leyendo de `pagos_directores`.
+> **Resueltas:**
+> - `TRAMO_COMISION_PCT/LABEL` (P-22, 2026-05-20): se calcula dinámicamente
+>   desde `pagos_directores`.
+> - `SUBTOTAL_COMISION_ATRASOS_PROVISIONAL` (P-23, 2026-05-21): se calcula
+>   dinámicamente desde `comisiones_atrasos_directores`.
 
 ---
 

@@ -20,7 +20,9 @@ Estado a **2026-05-14** tras cerrar varios hitos:
 
 - **Sprint 15** ✅: **slides 8 y 10 integrados** (Break Even mes actual + proyección mes+1, escenario `con_crm` sin extras, narrativa determinista 3 ramas, estados ✓SUPERADO/FALTAN, margen seguridad con color condicional). **Posicionamiento dinámico** del marcador `{{ingresos_totales}}` en la barra del slide 8 vía `updatePageElementTransform` con interpolación proporcional entre los 4 hitos (módulo nuevo `app/break_even_chart.py`, 21 tests unitarios, script `scripts/simular_break_even.py` para validar escenarios). **Fuentes resumen mensual:** `contratos_firmados` y derivados ahora desde `resumen_mensual_arras` + `resumen_mensual_alquileres` (slides 1/2/3, gráfico incluido); `reservas_alquiler` (slide 4) desde `resumen_mensual_alquiler_senales`. **Tramo de comisión dinámico** desde `pagos_directores` (P-22 cerrado). **Fix `var_rentab_mom`** (slide 2 card 4): puntos porcentuales en vez de variación relativa. **Filtro slide 7** `fecha_arras_sin_condic IS NOT NULL` (excluye operaciones "PONER FECHA"). **`n_max`** alineados con plantilla: ventas_pendientes 18→21, operaciones_condicionadas 12→22 (corrige bug latente de tokens literales visibles). MAPEO_DATOS actualizado con sección de **Aprendizajes técnicos** (12 puntos).
 
-Próximos pasos: Slide 9 Parte C pendiente fuente (P-23). Cambiar API Key débil de producción (P-26). Decisión P-25 (cobros que no caben — alivia con filtro IS NOT NULL del slide 7). Endurecer ingesta ante NULL (P-27). Confirmar comportamiento ingesta vs filas manuales (P-28). Bug etiqueta plantilla slide 2 card 1 (`{{mes_anterior_short}}`→`{{mes_año_anterior_short}}`). Validar P-18, P-21 con contabilidad.
+- **Sprint 16** ✅: **Slide 9 Parte C integrado** (`comisiones_atrasos_directores`, P-23 cerrado): fuente real, subtotal por SUM real, `n_max=7`. **Migración multi-sede masiva** (decisión documentada en `docs/MIGRACION_MULTISEDE.md`): tablas COMPARTIDAS con columna `sede` → `ventas_comerciales`, `pagos_directores` (movida de `finanzas_automation` a `informes_financieros`), `pago_agentes`, `comisiones_atrasos_directores`. Las 9+ queries del calculator reciben `sede` y filtran con `WHERE sede = %(sede)s`; `SEDES_VALIDAS = {"Valencia","Alicante"}` valida pronto. `_query_pipeline_ventas` y `_query_pipeline_alquileres` movidas a `calculator_base` (parametrizado el filtro de obra nueva). **Arranque de Alicante**: nuevo módulo `calculator_alicante.py` (slide 1, 2 y parte de 3 cubiertos), helper `_variacion_tasa` para tasas con denominador negativo, decisión arquitectónica B (dispatcher + calculator por sede). Tests 113/113 ✓ en cada paso.
+
+Próximos pasos: Migrar `resumen_mensual_*` (3 tablas) a multi-sede cuando Alicante cargue datos ahí. Continuar `calculator_alicante.py` slide a slide. Cambiar API Key débil de producción (P-26). Decisión P-25 (cobros que no caben — alivia con filtro IS NOT NULL del slide 7). Endurecer ingesta ante NULL (P-27). Confirmar comportamiento ingesta vs filas manuales (P-28). Bug etiqueta plantilla slide 2 card 1 (`{{mes_anterior_short}}`→`{{mes_año_anterior_short}}`). Validar P-18, P-21 con contabilidad. Refactor `calculator.py` → `calculator_valencia.py` + dispatcher (en espera por decisión del usuario).
 
 ---
 
@@ -509,12 +511,13 @@ Bajo coste de implementación, alto valor antes de exponer públicamente.
 Orden sugerido (cada uno desbloquea o aporta valor visible):
 
 1. **P-26** — rotar API Key débil de producción (bloqueante antes de entrega ERP).
-2. **P-23** — confirmar fuente de "COBRADO DE MESES ANTERIORES" (slide 9 Parte C, último bloqueo del calculator de Valencia).
-3. **Commit + despliegue** de todo lo de Sprint 15 al servidor de producción.
-4. **P-21** — confirmar con contabilidad origen de `inversion_tecnologica` (27k€).
-5. **P-28** — confirmar comportamiento de la ingesta n8n vs filas manuales en `ventas_comerciales` (UPSERT por `numero` o INSERT ciego).
-6. **P-18** — validar discrepancias del slide 2/3 con contabilidad (acción externa).
-7. **Plantilla:** fix card 1 slide 2 (`{{mes_anterior_short}}` → `{{mes_año_anterior_short}}`).
-8. **P-27** — endurecer ingesta n8n para fallar si concepto esperado no aparece (NULL silenciosos).
-9. **P-09** — arrancar informe Alicante (calculator separado, plantilla nueva, ~10 slides).
-10. **P-25** — decisión final cobros que no caben (aliviado pero no resuelto).
+2. **Continuar `calculator_alicante.py`** slide a slide (hoy cubre 1, 2 y parte de 3).
+3. **Commit + despliegue** de todo lo del Sprint 16 al servidor de producción.
+4. **Migrar `resumen_mensual_*`** (3 tablas) a multi-sede cuando Alicante tenga datos ahí (hoy: SIN columna `sede`, sin filtrar).
+5. **Refactor calculator Valencia** → `calculator_valencia.py` + dispatcher en `calculator.py` (decidido Opción B, en espera por el usuario).
+6. **P-21** — confirmar con contabilidad origen de `inversion_tecnologica` (27k€).
+7. **P-28** — confirmar comportamiento de la ingesta n8n vs filas manuales en `ventas_comerciales` (UPSERT por `numero` o INSERT ciego).
+8. **P-18** — validar discrepancias del slide 2/3 con contabilidad (acción externa).
+9. **Plantilla:** fix card 1 slide 2 (`{{mes_anterior_short}}` → `{{mes_año_anterior_short}}`).
+10. **P-27** — endurecer ingesta n8n para fallar si concepto esperado no aparece (NULL silenciosos).
+11. **P-25** — decisión final cobros que no caben (aliviado pero no resuelto).

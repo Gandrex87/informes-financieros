@@ -41,13 +41,16 @@ def generar_grafico_reservas_arras(periodos: list[DatoPeriodo]) -> bytes:
     """Genera el grafico de barras agrupadas Reservas vs Contratos Firmados.
 
     Args:
-        periodos: lista de 3 DatoPeriodo (mes-anyo-anterior, mes-anterior, actual).
+        periodos: lista de 2 o 3 DatoPeriodo.
+            - 3 periodos: Valencia (mes-anyo-anterior YoY, mes-anterior, actual).
+            - 2 periodos: Alicante (mes-anterior, actual) — sin YoY porque no
+              hay datos 2025 de Alicante.
 
     Returns:
         bytes del PNG.
     """
-    if len(periodos) != 3:
-        raise ValueError(f"Se esperan 3 periodos, recibidos {len(periodos)}.")
+    if len(periodos) not in (2, 3):
+        raise ValueError(f"Se esperan 2 o 3 periodos, recibidos {len(periodos)}.")
 
     etiquetas = [p.etiqueta for p in periodos]
     valores_reservas = [p.reservas for p in periodos]
@@ -86,7 +89,7 @@ def generar_grafico_reservas_arras(periodos: list[DatoPeriodo]) -> bytes:
                 xy=(b.get_x() + b.get_width() / 2, altura),
                 xytext=(0, 5), textcoords="offset points",
                 ha="center", va="bottom",
-                color=color, fontsize=12, fontweight="bold",
+                color=color, fontsize=14, fontweight="bold",
             )
 
     # Eje X
