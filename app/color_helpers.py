@@ -27,6 +27,21 @@ def _extract_text(text_block: dict) -> str:
     return "".join(parts).strip()
 
 
+def _walk_page_elements(elements: list[dict]):
+    """Itera recursivamente todos los pageElements, entrando en elementGroups.
+
+    Slides API agrupa shapes en `elementGroup`s cuando el editor los agrupa
+    visualmente. Sin esta recursion solo se ven los pageElements de primer
+    nivel; los shapes agrupados (ej. la barra de hitos del slide 8 Break
+    Even) quedan invisibles para `find_text_locations` y no se colorean.
+    """
+    for el in elements:
+        if "elementGroup" in el:
+            yield from _walk_page_elements(el["elementGroup"].get("children", []))
+        else:
+            yield el
+
+
 def find_text_locations(deck: dict, contains: str) -> list[dict]:
     """Busca shapes/celdas cuyo texto contiene la subcadena dada.
 
@@ -39,10 +54,14 @@ def find_text_locations(deck: dict, contains: str) -> list[dict]:
     Para celdas de tabla:
         {object_id, kind: "cell", row, col, full_text}
         (object_id es el de la tabla contenedora, no de la celda)
+
+    Recorre recursivamente dentro de elementGroups (los shapes agrupados
+    en el editor de Slides viven dentro de un elementGroup y no son visibles
+    en el primer nivel de pageElements).
     """
     matches = []
     for slide in deck.get("slides", []):
-        for el in slide.get("pageElements", []):
+        for el in _walk_page_elements(slide.get("pageElements", [])):
             if "shape" in el:
                 text = _extract_text(el["shape"].get("text", {}))
                 if contains in text:

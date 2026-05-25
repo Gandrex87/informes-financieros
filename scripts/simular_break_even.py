@@ -108,6 +108,32 @@ def main() -> int:
     # 5) Color del margen_seguridad coherente con el signo
     payload["_color_overrides"]["margen_seguridad"] = "verde" if ms >= 0 else "rojo"
 
+    # 6) Color overrides de los 5 *_estado y los 5 IMPORTES de umbral
+    # (replica exacta de la logica de calculator_valencia.py para que la
+    # simulacion sea coherente con ingresos_sim, no con los ingresos
+    # originales del payload).
+    m40 = (
+        payload["_break_even_position"].get("margen_40")
+        if payload["_break_even_position"].get("margen_40") is not None
+        else m30
+    )
+    for tok, umbral in (
+        ("break_even_estado", be),
+        ("margen_10_estado", m10),
+        ("margen_20_estado", m20),
+        ("margen_30_estado", m30),
+        ("margen_40_estado", m40),
+    ):
+        payload["_color_overrides"][tok] = "verde" if ingresos_sim >= umbral else "rojo"
+    for tok, umbral in (
+        ("break_even", be),
+        ("margen_10_objetivo", m10),
+        ("margen_20_objetivo", m20),
+        ("margen_30_objetivo", m30),
+        ("margen_40_objetivo", m40),
+    ):
+        payload["_color_overrides"][tok] = "verde" if ingresos_sim >= umbral else "blanco"
+
     print()
     print("Tokens del slide 8 tras simulacion:")
     for k in ("ingresos_totales", "margen_seguridad",

@@ -641,14 +641,10 @@ def build_payload(
     # saldria en verde, comunicando lo contrario de la realidad.
     if margen_seguridad is not None:
         color_overrides["margen_seguridad"] = "verde" if margen_seguridad >= 0 else "rojo"
-    # Slide 8: color de los 5 estados (columna ESTADO de la tabla de la
-    # derecha). "✓ SUPERADO" -> verde; "FALTAN: <X> €" -> rojo. Sin estos
-    # overrides los colores son fijos en plantilla (verde/rojo hardcoded
-    # para abril 2026) y engañan en otros meses donde el estado cambie.
-    # Solo coloreamos los *_estado, no los importes: los tokens de
-    # importe (break_even, margen_N_objetivo) tambien aparecen en la
-    # barra/linea de tiempo de la izquierda, y pintarla cambiaria su
-    # significado visual.
+    # Slide 8: color de los 5 ESTADOS (columna ESTADO de la tabla derecha).
+    # "✓ SUPERADO" -> verde; "FALTAN: <X> €" -> rojo. Sin estos overrides
+    # los colores son fijos en plantilla (hardcoded para abril 2026) y
+    # engañan en otros meses donde el estado cambie.
     for _tok, _umbral in (
         ("break_even_estado", be_break_even),
         ("margen_10_estado", be_m10),
@@ -658,6 +654,22 @@ def build_payload(
     ):
         if ingresos_be is not None and _umbral is not None:
             color_overrides[_tok] = "verde" if ingresos_be >= _umbral else "rojo"
+
+    # Slide 8: color de los 5 IMPORTES de umbral (break_even, margen_N_objetivo).
+    # Verde si la facturacion supera ese umbral, blanco si no. Aplica a las DOS
+    # cajas donde aparece cada importe: la barra/linea de tiempo izquierda Y
+    # la columna OBJETIVO de la tabla derecha (apply_color_overrides busca por
+    # VALOR de texto y pinta ambas). Decision usuario 2026-05-25.
+    # Fondo del slide es azul oscuro -> blanco se ve bien sobre el fondo.
+    for _tok, _umbral in (
+        ("break_even", be_break_even),
+        ("margen_10_objetivo", be_m10),
+        ("margen_20_objetivo", be_m20),
+        ("margen_30_objetivo", be_m30),
+        ("margen_40_objetivo", be_m40),
+    ):
+        if ingresos_be is not None and _umbral is not None:
+            color_overrides[_tok] = "verde" if ingresos_be >= _umbral else "blanco"
     # Slide 11: mismos criterios que slide 6 para version compacta
     color_overrides["volumen_riesgo_short"] = impacto_color
     # Slide 11: rentabilidad operativa con signo, verde si supera el objetivo
@@ -690,6 +702,29 @@ def build_payload(
             "margen_10": be_m10,
             "margen_20": be_m20,
             "margen_30": be_m30,
+        },
+
+        # Valores numericos para el marcador {{facturacion_objetivo_proy}}
+        # del slide 10 (Break Even proyectado mes siguiente). Hoy
+        # facturacion_objetivo_proy == break_even_proy (decision: el
+        # objetivo minimo a facturar). Si en el futuro deja de ser igual,
+        # la mecanica de carriles sigue funcionando con cualquier valor.
+        "_break_even_position_proy": {
+            "facturacion_objetivo_proy": (
+                break_even_proy.break_even if break_even_proy else None
+            ),
+            "break_even_proy": (
+                break_even_proy.break_even if break_even_proy else None
+            ),
+            "margen_10_proy": (
+                break_even_proy.ingresos_margen_10 if break_even_proy else None
+            ),
+            "margen_20_proy": (
+                break_even_proy.ingresos_margen_20 if break_even_proy else None
+            ),
+            "margen_30_proy": (
+                break_even_proy.ingresos_margen_30 if break_even_proy else None
+            ),
         },
 
         # Identificacion

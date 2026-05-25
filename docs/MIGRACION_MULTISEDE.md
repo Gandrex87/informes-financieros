@@ -9,6 +9,85 @@ de Postgres se discute slide por slide y se decide:
 - **Sin cambios**: la tabla queda como está (ya tiene `sede` o solo aplica
   a una sede).
 
+## TL;DR para agentes que retomen este trabajo
+
+Si vas a **añadir una sede nueva** o vienes a **entender cómo está montado el
+multi-sede hoy**, el orden de lectura recomendado es:
+
+1. **Este "TL;DR"** (resumen ejecutivo del estado actual).
+2. **"Trampas conocidas"** al final del documento (lecciones aprendidas con
+   sangre — leerlas evita repetir bugs reales en producción).
+3. **"Checklist resumido para Castellón"** (los pasos exactos a seguir).
+4. El resto del documento (historia y razonamiento de cada decisión) solo
+   cuando necesites contexto profundo de por qué algo es como es.
+
+### Estado del modelo de datos (2026-05-22)
+
+Todas las tablas relevantes son **COMPARTIDAS con columna `sede`** (decisión
+2026-05-20/22). El experimento inicial de separar `ventas_comerciales` en
+`*_valencia`/`*_alicante` se revirtió el mismo día por innecesario. La
+separación por sede SOLO se aplicó a `pagos_directores` inicialmente y
+también se revirtió a compartida el 2026-05-21.
+
+Tablas hoy con `sede`:
+- `finanzas_automation.ventas_comerciales`
+- `informes_financieros.contabilidad_mensual` (ya la tenía desde el inicio)
+- `informes_financieros.pagos_directores` (movida desde `finanzas_automation` 2026-05-21)
+- `informes_financieros.pago_agentes`
+- `informes_financieros.comisiones_atrasos_directores`
+- `informes_financieros.resumen_mensual_arras` (movida desde `finanzas_automation` 2026-05-22)
+- `informes_financieros.resumen_mensual_arras__sin_condicion` (movida 2026-05-22)
+- `informes_financieros.resumen_mensual_alquileres` (movida 2026-05-22)
+- `informes_financieros.resumen_mensual_alquiler_senales` (movida 2026-05-22)
+
+### Estado del código (2026-05-22)
+
+- `app/calculator.py` → **DISPATCHER**. Funciones: `build_payload(sede,
+  anyo, mes, escenario)` y `template_id_for(sede)`.
+- `app/calculator_valencia.py` → calculator de Valencia. Función entrada
+  `build_payload(sede=..., anyo=..., mes=..., escenario=...)`.
+- `app/calculator_alicante.py` → calculator de Alicante. Función entrada
+  `build_payload(anyo=..., mes=..., escenario=...)` (sin `sede`, es
+  constante `SEDE = "Alicante"`).
+- `app/calculator_base.py` → queries comunes parametrizadas por `sede` +
+  helpers + dataclasses. Cada query valida `sede in SEDES_VALIDAS`.
+- `app/generator.py` → `generate_report` ahora requiere `template_id`
+  **obligatorio**. El caller resuelve el template via
+  `calculator.template_id_for(sede)`.
+
+### Estado de la configuración (2026-05-22)
+
+Variables de entorno:
+- ❌ Eliminada: `SLIDES_TEMPLATE_ID` (genérico).
+- ✅ Nuevas: `SLIDES_TEMPLATE_ID_VALENCIA`, `SLIDES_TEMPLATE_ID_ALICANTE`.
+- Si falta una → `RuntimeError` explícito (lección P-27: nunca generar PDF
+  con plantilla equivocada).
+
+Estas variables deben estar **simultáneamente en tres sitios**:
+1. `.env` local (para desarrollo).
+2. `.env` del servidor de producción.
+3. `docker-compose.yml` (bloque `environment:` del servicio `informes-api`).
+
+**Saltarse el punto 3 fue causa de un bug en producción 2026-05-22** — ver
+Trampa 9 al final del documento.
+
+### Diagnóstico rápido
+
+`GET /health` (sin auth, pensado para diagnóstico) devuelve:
+
+```json
+{
+  "status": "ok",
+  "templates": {"Valencia": "1HQ...", "Alicante": "1uQ..."},
+  "user_email": "informes-bot-prod@..."
+}
+```
+
+Si una sede no aparece en `templates`, el problema es de configuración
+(no de código). Ver Trampa 10.
+
+---
+
 ## Heurística acordada (2026-05-20)
 
 > "Tabla compartida con columna `sede` cuando el esquema y la semántica son
@@ -234,8 +313,9 @@ concreta se mueve a su `calculator_<sede>.py`.
 
 - [x] **Valencia**: 1-12 completos y validados contra plantilla.
 - [x] **Alicante**: 1-10 completos en `calculator_alicante.py` con datos
-      reales de Postgres (2026-05-22). Plantilla independiente (otro
-      `SLIDES_TEMPLATE_ID`, hardcoded en `scripts/generar_alicante_desde_db.py`).
+      reales de Postgres (2026-05-22). Plantilla independiente
+      (`SLIDES_TEMPLATE_ID_ALICANTE` en `.env`, resuelta vía
+      `calculator.template_id_for("Alicante")`).
       Constantes provisionales que persisten:
       - `FACTURACION_OBJETIVO_PROY_PROVISIONAL = Decimal("160000.00")` (slide 8,
         marcador móvil — direccion lo fija manualmente, fuente real sin
@@ -334,9 +414,10 @@ La arquitectura multi-sede del proyecto se basa en **3 capas**:
 
 ### 1. Plantilla de Google Slides para la nueva sede
 
-- **Plantilla independiente**. Otro `SLIDES_TEMPLATE_ID`, copiada de la sede
-  más parecida (Valencia o Alicante) y adaptada visualmente. NO compartas
-  la plantilla con otra sede.
+- **Plantilla independiente**. Otro Google Slides (con su propio ID), copiada
+  de la sede más parecida (Valencia o Alicante) y adaptada visualmente. NO
+  compartas la plantilla con otra sede. El ID se configurará después en
+  `SLIDES_TEMPLATE_ID_<SEDE>` del `.env`.
 - Decidir **estructuralmente** qué slides lleva (puede ser ≠ a Valencia y
   Alicante). Documentar las diferencias arriba en este documento.
 - Compartir la plantilla con la Service Account (`sistemas@…` Workspace) con
@@ -570,31 +651,158 @@ Si te tientan los condicionales por sede dentro de funciones compartidas:
 independiente. Las diferencias estructurales (slides distintos, qué
 tabla muestra qué) no encajan en una única función con ramas.
 
+La ÚNICA excepción permitida es `app/calculator.py` (el dispatcher), que
+solo enruta `sede → módulo correspondiente` y no contiene lógica de
+negocio. Cualquier `if sede ==` fuera de ahí huele a deuda técnica.
+
+### 9. `docker-compose.yml` filtra qué variables del `.env` ven los contenedores
+
+**Lección aprendida en producción 2026-05-22.** Tras el refactor que
+añadió `SLIDES_TEMPLATE_ID_VALENCIA` y `SLIDES_TEMPLATE_ID_ALICANTE` al
+`.env`, el servicio en producción fallaba con:
+
+> Bad request - please check your parameters
+> Falta la variable de entorno SLIDES_TEMPLATE_ID_ALICANTE para la sede 'Alicante'.
+
+Causa: aunque las variables estaban en `.env`, **`docker-compose.yml`
+filtra explícitamente** qué env vars llegan al contenedor en su bloque
+`environment:`. La línea vieja era:
+
+```yaml
+SLIDES_TEMPLATE_ID: ${SLIDES_TEMPLATE_ID}
+```
+
+Y no había referencias a las dos nuevas. Resultado: el contenedor leía
+`os.environ["SLIDES_TEMPLATE_ID_ALICANTE"]` y devolvía `""`.
+
+**Política**: cada vez que se añade una env var nueva en `.env`, hay que
+añadirla también al bloque `environment:` de `docker-compose.yml`. En
+local con `.venv` no se nota porque Python lee `.env` directo, pero en
+prod con Docker hay un punto de filtrado intermedio.
+
+Cómo diagnosticarlo rápido:
+
+```bash
+# Desde el host del servidor:
+docker exec informes-financieros-api env | grep SLIDES_TEMPLATE
+# Si no aparecen las dos sedes -> docker-compose.yml mal.
+
+# O directamente al /health (no requiere API Key):
+curl -s http://localhost:8012/health
+# Debe devolver "templates": {"Valencia": "...", "Alicante": "..."}
+```
+
+Si `templates` viene vacío o falta una sede, el `compose.yml` está
+desactualizado.
+
+Tras corregir `docker-compose.yml` no basta con `docker compose restart`:
+hay que **recrear el contenedor** para que relea el bloque `environment`:
+
+```bash
+docker compose down
+docker compose up -d --build
+```
+
+### 10. Endpoint `/health` es el primer chequeo tras desplegar
+
+Resumen práctico: tras cualquier deploy que toque envvars o
+configuración de plantilla, **lo primero es llamar a `/health`** y leer
+el campo `templates`:
+
+```bash
+curl -s http://localhost:8012/health
+# Esperado:
+# {
+#   "status": "ok",
+#   "templates": {"Valencia": "1HQ...", "Alicante": "1uQ..."},
+#   "user_email": "informes-bot-prod@..."
+# }
+```
+
+Si:
+- `templates` está vacío `{}` → las dos env vars no llegan al
+  contenedor (revisar `docker-compose.yml`).
+- `templates` tiene solo una sede → revisar la línea exacta del `.env`
+  de la sede ausente (espacios sobrantes, comillas, etc.).
+- `user_email` es `null` → el contenedor arrancó pero falla al hablar
+  con Google (Service Account mal montada o sin permisos sobre el
+  Shared Drive).
+- Conexión rechazada / timeout → el contenedor no está corriendo
+  (`docker ps` para confirmar).
+
+`/health` **no requiere `X-API-Key`**: es público dentro de la red
+Docker. Pensado precisamente para que healthchecks y diagnósticos no
+dependan de credenciales.
+
 ## Checklist resumido para Castellón (o futura sede X)
 
-- [ ] Plantilla Google Slides creada y compartida con SA.
+### Pre-requisitos externos
+- [ ] Plantilla Google Slides creada y compartida (Editor) con la Service
+      Account corporativa.
+- [ ] ID de la plantilla anotado (parte del URL después de `/d/`).
 - [ ] Datos de la sede X cargados en Postgres (todas las tablas con
       `sede='X'`).
-- [ ] Constantes acordadas con dirección: N_DIRECTORES, SUELDO_FIJO,
+- [ ] Constantes acordadas con dirección: `N_DIRECTORES`, `SUELDO_FIJO`,
       rentabilidad_op vs real, presencia de alquileres/obra
       nueva/condicionadas.
-- [ ] Añadir `"X"` a `SEDES_VALIDAS` en `calculator_base.py`.
-- [ ] Crear `app/calculator_<sede>.py` partiendo del calculator más parecido
-      (Valencia si la sede tiene todos los productos; Alicante si es más
-      simple). Mantener `SEDE = "X"` como constante de módulo.
-- [ ] Crear `scripts/generar_<sede>_desde_db.py` (copia de
-      `generar_alicante_desde_db.py` con su `TEMPLATE_ID`).
+
+### Código
+- [ ] Añadir `"X"` a `SEDES_VALIDAS` en `app/calculator_base.py`.
+- [ ] Crear `app/calculator_<sede>.py` partiendo del calculator más
+      parecido (Valencia si la sede tiene todos los productos; Alicante
+      si es más simple). Mantener `SEDE = "X"` como constante de módulo.
+      Exponer función `build_payload(anyo, mes, escenario)` (sin `sede`
+      porque el módulo es de una sola sede).
+- [ ] Añadir rama en el dispatcher `app/calculator.py`:
+      ```python
+      if sede == "X":
+          from app.calculator_<sede> import build_payload as _build
+          return _build(anyo=anyo, mes=mes, escenario=escenario)
+      ```
+- [ ] (Opcional) Crear `scripts/generar_<sede>_desde_db.py` para
+      iteración rápida en local sin pasar por el endpoint.
+
+### Configuración (CRÍTICO: 3 sitios distintos)
+
+Cada vez que se añade una sede hay que actualizar **TODOS** estos sitios.
+Saltarse uno = el servicio en producción falla con un mensaje claro
+("Falta la variable de entorno SLIDES_TEMPLATE_ID_X").
+
+- [ ] **`.env` local**: añadir `SLIDES_TEMPLATE_ID_<X>=<ID>`.
+- [ ] **`.env` del servidor de producción**: lo mismo.
+- [ ] **`docker-compose.yml`** (bloque `environment:` del servicio
+      `informes-api`): añadir
+      `SLIDES_TEMPLATE_ID_<X>: ${SLIDES_TEMPLATE_ID_<X>}`.
+      Sin esto, aunque la variable esté en `.env`, el contenedor no
+      la verá (ver Trampa 9).
+
+### Validación
 - [ ] Recorrer slides en el orden de la plantilla, validando visualmente
-      tras cada uno. Usar TodoWrite para trazabilidad.
+      tras cada uno.
+- [ ] Generar PDF de la sede en local: `python scripts/generar_desde_db.py X 2026 4`.
+      Debe pasar sin errores; verificar visualmente las primeras 2-3 slides.
 - [ ] Hacer commit por hitos (no commit gigante al final).
-- [ ] Cuando todo esté funcionando, considerar el refactor de dispatcher
-      (renombrar `calculator.py` → `calculator_valencia.py` + nuevo
-      `calculator.py` con dispatcher).
-- [ ] Actualizar este documento con las decisiones específicas de la
-      sede X.
-- [ ] Actualizar `memory/project_diferencias_valencia_alicante.md` (renombrar
-      a algo más genérico tipo `project_diferencias_por_sede.md` si ya
-      hay 3+ sedes).
+
+### Deploy a producción
+- [ ] `git push` desde local.
+- [ ] En servidor: `git pull`.
+- [ ] Confirmar que `.env` del servidor tiene `SLIDES_TEMPLATE_ID_<X>`.
+- [ ] **Recrear el contenedor** (no basta `restart`):
+      `docker compose down && docker compose up -d --build`.
+- [ ] **Validar con `/health`**:
+      `curl -s http://localhost:8012/health`. El campo `templates` debe
+      incluir la sede X. Si no aparece → revisar Trampa 9.
+- [ ] Probar generación end-to-end desde n8n con
+      `{"sede": "X", "anyo": ..., "mes": ...}`.
+
+### Documentación
+- [ ] Actualizar este documento (`docs/MIGRACION_MULTISEDE.md`) con las
+      decisiones específicas de la sede X.
+- [ ] Actualizar `memory/project_diferencias_valencia_alicante.md`
+      (renombrar a algo más genérico tipo
+      `project_diferencias_por_sede.md` si ya hay 3+ sedes).
+- [ ] Si la sede X descubre alguna trampa nueva no listada,
+      añadirla a la sección "Trampas conocidas".
 
 ## Tiempo estimado
 

@@ -22,16 +22,11 @@ load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
 from app.auth import build_clients
+from app.calculator import template_id_for
 from app.calculator_alicante import build_payload
 from app.generator import GenerationError, generate_report
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-
-# Template de Alicante en Drive (hardcoded provisional, igual que en
-# generate_mock_alicante.py). Cuando integremos multi-sede al endpoint
-# /generar-desde-db, se movera a una variable de entorno tipo
-# SLIDES_TEMPLATE_ID_ALICANTE.
-TEMPLATE_ID_ALICANTE = "1uQ-LTgElcrY4Kx7j2yEuPDD4JWzAHs_Ju6vIgBM70e8"
 
 
 def main() -> int:
@@ -48,12 +43,13 @@ def main() -> int:
     payload = build_payload(anyo, mes)
     print(f"  {len(payload)} campos calculados.")
 
+    template_id = template_id_for("Alicante")
     slides, drive = build_clients(ROOT)
-    print("Generando PDF (template Alicante)...")
+    print(f"Generando PDF (template {template_id})...")
     try:
         pdf_bytes = generate_report(
             payload, slides, drive,
-            template_id=TEMPLATE_ID_ALICANTE,
+            template_id=template_id,
         )
     except GenerationError as e:
         print(f"ERROR: {e}")

@@ -13,7 +13,10 @@ from pathlib import Path
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
-from app.break_even_chart import apply_breakeven_marker_position
+from app.break_even_chart import (
+    apply_slide_8_marker_position,
+    apply_slide_10_marker_position,
+)
 from app.chart_generator import DatoPeriodo, generar_grafico_reservas_arras
 from app.color_helpers import apply_color_overrides
 from app.image_helpers import (
@@ -38,6 +41,13 @@ CHART_RESERVAS_ARRAS_TOKEN = "{{grafico_reservas_arras}}"
 # Estructura: dict con keys ingresos, break_even, margen_10, margen_20,
 # margen_30 (Decimal/float). Si falta o algun valor es None, no se mueve.
 BREAK_EVEN_POSITION_KEY = "_break_even_position"
+
+# Clave del payload con los valores para el marcador del slide 10
+# (Break Even proyectado mes siguiente).
+# Estructura: dict con keys facturacion_objetivo_proy, break_even_proy,
+# margen_10_proy, margen_20_proy, margen_30_proy (Decimal/float).
+# Si falta o algun valor es None, no se mueve.
+BREAK_EVEN_POSITION_PROY_KEY = "_break_even_position_proy"
 
 
 # Especificacion de listas que se expanden a slots numerados antes de
@@ -190,8 +200,14 @@ def generate_report(
     color_overrides = data.get(COLOR_OVERRIDES_KEY, {}) or {}
     chart_reservas_arras = data.get(CHART_RESERVAS_ARRAS_KEY)
     break_even_position = data.get(BREAK_EVEN_POSITION_KEY)
+    break_even_position_proy = data.get(BREAK_EVEN_POSITION_PROY_KEY)
 
-    special_keys = {COLOR_OVERRIDES_KEY, CHART_RESERVAS_ARRAS_KEY, BREAK_EVEN_POSITION_KEY}
+    special_keys = {
+        COLOR_OVERRIDES_KEY,
+        CHART_RESERVAS_ARRAS_KEY,
+        BREAK_EVEN_POSITION_KEY,
+        BREAK_EVEN_POSITION_PROY_KEY,
+    }
     data_clean = {k: v for k, v in data.items() if k not in special_keys}
 
     expanded = expand_lists(data_clean, LIST_SPECS)
@@ -207,12 +223,12 @@ def generate_report(
 
         # Slide 8: posicionar dinamicamente el marcador {{ingresos_totales}}
         # en la barra de break even segun el valor real del mes. Esto va
-        # ANTES de _replace_tokens porque locate_breakeven_anchors busca los
-        # tokens {{...}} literales en la plantilla; una vez sustituidos por
-        # sus valores no se podria identificar el shape a mover.
+        # ANTES de _replace_tokens porque locate_anchors busca los tokens
+        # {{...}} literales en la plantilla; una vez sustituidos por sus
+        # valores no se podria identificar el shape a mover.
         if break_even_position:
             try:
-                apply_breakeven_marker_position(
+                apply_slide_8_marker_position(
                     slides_client, copy_id,
                     ingresos=break_even_position.get("ingresos"),
                     valor_break_even=break_even_position.get("break_even"),
@@ -221,7 +237,25 @@ def generate_report(
                     valor_margen_30=break_even_position.get("margen_30"),
                 )
             except Exception as e:
-                logger.exception("Error posicionando marcador break even: %s", e)
+                logger.exception("Error posicionando marcador break even slide 8: %s", e)
+
+        # Slide 10: posicionar marcador {{facturacion_objetivo_proy}} en la
+        # barra de break even proyectado (mes siguiente). Mismo patron que
+        # el slide 8 pero con tokens *_proy. Tambien ANTES de _replace_tokens.
+        if break_even_position_proy:
+            try:
+                apply_slide_10_marker_position(
+                    slides_client, copy_id,
+                    facturacion_objetivo_proy=break_even_position_proy.get(
+                        "facturacion_objetivo_proy"
+                    ),
+                    valor_break_even_proy=break_even_position_proy.get("break_even_proy"),
+                    valor_margen_10_proy=break_even_position_proy.get("margen_10_proy"),
+                    valor_margen_20_proy=break_even_position_proy.get("margen_20_proy"),
+                    valor_margen_30_proy=break_even_position_proy.get("margen_30_proy"),
+                )
+            except Exception as e:
+                logger.exception("Error posicionando marcador break even slide 10: %s", e)
 
         total, missing = _replace_tokens(slides_client, copy_id, expanded)
         logger.info("%d reemplazos efectivos.", total)
