@@ -14,6 +14,8 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 from app.break_even_chart import (
+    apply_slide_6_alicante_marker_position,
+    apply_slide_8_alicante_marker_position,
     apply_slide_8_marker_position,
     apply_slide_10_marker_position,
 )
@@ -48,6 +50,23 @@ BREAK_EVEN_POSITION_KEY = "_break_even_position"
 # margen_10_proy, margen_20_proy, margen_30_proy (Decimal/float).
 # Si falta o algun valor es None, no se mueve.
 BREAK_EVEN_POSITION_PROY_KEY = "_break_even_position_proy"
+
+# Clave del payload con los valores para el marcador del slide 6 de
+# Alicante (Break Even mes actual). Equivalente funcional al slide 8 de
+# Valencia pero el marcador es {{contratos_firmados}}, no
+# {{ingresos_totales}}.
+# Estructura: dict con keys contratos_firmados, break_even, margen_10,
+# margen_20, margen_30 (Decimal/float). Si falta o algun valor es None,
+# no se mueve.
+BREAK_EVEN_POSITION_SLIDE_6_ALC_KEY = "_break_even_position_slide_6_alc"
+
+# Clave del payload con los valores para el marcador del slide 8 de
+# Alicante (Break Even proyectado mes siguiente). Equivalente funcional
+# al slide 10 de Valencia pero apunta a slide_index=7 (la plantilla
+# Alicante tiene el BE proyectado en otro lugar).
+# Estructura: dict con keys facturacion_objetivo_proy, break_even_proy,
+# margen_10_proy, margen_20_proy, margen_30_proy (Decimal/float).
+BREAK_EVEN_POSITION_SLIDE_8_ALC_KEY = "_break_even_position_slide_8_alc"
 
 
 # Especificacion de listas que se expanden a slots numerados antes de
@@ -201,12 +220,16 @@ def generate_report(
     chart_reservas_arras = data.get(CHART_RESERVAS_ARRAS_KEY)
     break_even_position = data.get(BREAK_EVEN_POSITION_KEY)
     break_even_position_proy = data.get(BREAK_EVEN_POSITION_PROY_KEY)
+    break_even_position_slide_6_alc = data.get(BREAK_EVEN_POSITION_SLIDE_6_ALC_KEY)
+    break_even_position_slide_8_alc = data.get(BREAK_EVEN_POSITION_SLIDE_8_ALC_KEY)
 
     special_keys = {
         COLOR_OVERRIDES_KEY,
         CHART_RESERVAS_ARRAS_KEY,
         BREAK_EVEN_POSITION_KEY,
         BREAK_EVEN_POSITION_PROY_KEY,
+        BREAK_EVEN_POSITION_SLIDE_6_ALC_KEY,
+        BREAK_EVEN_POSITION_SLIDE_8_ALC_KEY,
     }
     data_clean = {k: v for k, v in data.items() if k not in special_keys}
 
@@ -256,6 +279,57 @@ def generate_report(
                 )
             except Exception as e:
                 logger.exception("Error posicionando marcador break even slide 10: %s", e)
+
+        # Slide 6 Alicante: equivalente al slide 8 de Valencia (Break Even
+        # mes actual) pero el marcador y el valor a posicionar son
+        # {{contratos_firmados}} (arras firmadas), no {{ingresos_totales}}.
+        # Los carriles usan los mismos tokens (sin sufijo) que Valencia
+        # slide 8; no hay colision porque cada sede tiene su propia
+        # plantilla. Tambien ANTES de _replace_tokens.
+        if break_even_position_slide_6_alc:
+            try:
+                apply_slide_6_alicante_marker_position(
+                    slides_client, copy_id,
+                    contratos_firmados=break_even_position_slide_6_alc.get(
+                        "contratos_firmados"
+                    ),
+                    valor_break_even=break_even_position_slide_6_alc.get("break_even"),
+                    valor_margen_10=break_even_position_slide_6_alc.get("margen_10"),
+                    valor_margen_20=break_even_position_slide_6_alc.get("margen_20"),
+                    valor_margen_30=break_even_position_slide_6_alc.get("margen_30"),
+                )
+            except Exception as e:
+                logger.exception(
+                    "Error posicionando marcador break even slide 6 Alicante: %s", e
+                )
+
+        # Slide 8 Alicante: equivalente al slide 10 de Valencia (BE proyectado)
+        # con los mismos tokens `_proy` pero slide_index=7 (Alicante tiene
+        # 10 slides en otro orden; el BE proyectado vive ahi).
+        if break_even_position_slide_8_alc:
+            try:
+                apply_slide_8_alicante_marker_position(
+                    slides_client, copy_id,
+                    facturacion_objetivo_proy=break_even_position_slide_8_alc.get(
+                        "facturacion_objetivo_proy"
+                    ),
+                    valor_break_even_proy=break_even_position_slide_8_alc.get(
+                        "break_even_proy"
+                    ),
+                    valor_margen_10_proy=break_even_position_slide_8_alc.get(
+                        "margen_10_proy"
+                    ),
+                    valor_margen_20_proy=break_even_position_slide_8_alc.get(
+                        "margen_20_proy"
+                    ),
+                    valor_margen_30_proy=break_even_position_slide_8_alc.get(
+                        "margen_30_proy"
+                    ),
+                )
+            except Exception as e:
+                logger.exception(
+                    "Error posicionando marcador break even slide 8 Alicante: %s", e
+                )
 
         total, missing = _replace_tokens(slides_client, copy_id, expanded)
         logger.info("%d reemplazos efectivos.", total)

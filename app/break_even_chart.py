@@ -91,6 +91,47 @@ CONFIG_SLIDE_10 = BreakEvenChartConfig(
 )
 
 
+# Configuracion del slide 6 de Alicante (Break Even mes actual).
+# Equivalente al slide 8 de Valencia (mismo patron, mismos carriles sin
+# sufijo `_proy`) PERO con marcador distinto:
+# - Valencia slide 8 posiciona {{ingresos_totales}} contra umbrales BD.
+# - Alicante slide 6 posiciona {{contratos_firmados}} (arras firmadas)
+#   contra los mismos umbrales BD. Decision usuario 2026-05-22: en
+#   Alicante la base del marcador y los estados de tabla es arras_total,
+#   coherente entre sí. Ver Trampa 5 en docs/MIGRACION_MULTISEDE.md.
+# slide_index=5 (0-based) porque Alicante tiene 10 slides en otro orden.
+CONFIG_SLIDE_6_ALICANTE = BreakEvenChartConfig(
+    name="slide 6 alicante",
+    slide_index=5,  # 0-based
+    token_marker="{{contratos_firmados}}",
+    token_marker_dot="{{_marker_dot}}",
+    token_carril_deficit="{{_carril_deficit}}",
+    token_carril_be_m10="{{_carril_be_m10}}",
+    token_carril_m10_m20="{{_carril_m10_m20}}",
+    token_carril_m20_m30="{{_carril_m20_m30}}",
+    token_carril_superior="{{_carril_superior}}",
+)
+
+
+# Configuracion del slide 8 de Alicante (Break Even proyectado mes siguiente).
+# Equivalente al slide 10 de Valencia (mismos tokens con sufijo `_proy`)
+# PERO con slide_index distinto: la plantilla Alicante tiene 10 slides en
+# total y el BE proyectado vive en el indice 7 (slide 8 humano).
+# CONFIG_SLIDE_10 (slide_index=9) NO sirve para Alicante; busca en el
+# indice 9 que en Alicante es "Proximos pasos" (sin carriles).
+CONFIG_SLIDE_8_ALICANTE = BreakEvenChartConfig(
+    name="slide 8 alicante",
+    slide_index=7,  # 0-based
+    token_marker="{{facturacion_objetivo_proy}}",
+    token_marker_dot="{{_marker_dot_proy}}",
+    token_carril_deficit="{{_carril_proy_deficit}}",
+    token_carril_be_m10="{{_carril_proy_be_m10}}",
+    token_carril_m10_m20="{{_carril_proy_m10_m20}}",
+    token_carril_m20_m30="{{_carril_proy_m20_m30}}",
+    token_carril_superior="{{_carril_proy_superior}}",
+)
+
+
 # ---------- Estructuras y logica pura ----------
 
 @dataclass
@@ -417,6 +458,58 @@ def apply_slide_10_marker_position(
     """
     _apply_marker_position(
         slides, presentation_id, CONFIG_SLIDE_10,
+        facturacion_objetivo_proy, valor_break_even_proy,
+        valor_margen_10_proy, valor_margen_20_proy, valor_margen_30_proy,
+    )
+
+
+def apply_slide_6_alicante_marker_position(
+    slides,
+    presentation_id: str,
+    contratos_firmados: Decimal | float | None,
+    valor_break_even: Decimal | float | None,
+    valor_margen_10: Decimal | float | None,
+    valor_margen_20: Decimal | float | None,
+    valor_margen_30: Decimal | float | None,
+) -> None:
+    """Posiciona {{contratos_firmados}} en la barra del slide 6 de Alicante
+    (Break Even mes actual).
+
+    Equivalente funcional al slide 8 de Valencia, pero el marcador y el
+    valor a posicionar son `contratos_firmados` (arras firmadas), no
+    `ingresos_totales`. Los 4 umbrales son los del mes actual (sin _proy).
+
+    Idempotente: usa ABSOLUTE. Si falta algun dato o la plantilla no tiene
+    los 5 carriles + marcador, registra WARNING y no toca nada.
+    """
+    _apply_marker_position(
+        slides, presentation_id, CONFIG_SLIDE_6_ALICANTE,
+        contratos_firmados, valor_break_even,
+        valor_margen_10, valor_margen_20, valor_margen_30,
+    )
+
+
+def apply_slide_8_alicante_marker_position(
+    slides,
+    presentation_id: str,
+    facturacion_objetivo_proy: Decimal | float | None,
+    valor_break_even_proy: Decimal | float | None,
+    valor_margen_10_proy: Decimal | float | None,
+    valor_margen_20_proy: Decimal | float | None,
+    valor_margen_30_proy: Decimal | float | None,
+) -> None:
+    """Posiciona {{facturacion_objetivo_proy}} en la barra del slide 8 de
+    Alicante (Break Even proyectado mes siguiente).
+
+    Equivalente funcional al slide 10 de Valencia (mismos tokens con
+    sufijo `_proy`) pero apunta al slide_index=7 (la plantilla Alicante
+    tiene el BE proyectado ahi, no en el indice 9).
+
+    Idempotente: usa ABSOLUTE. Si falta algun dato o la plantilla no tiene
+    los 5 carriles + marcador, registra WARNING y no toca nada.
+    """
+    _apply_marker_position(
+        slides, presentation_id, CONFIG_SLIDE_8_ALICANTE,
         facturacion_objetivo_proy, valor_break_even_proy,
         valor_margen_10_proy, valor_margen_20_proy, valor_margen_30_proy,
     )

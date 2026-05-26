@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Sedes validas. Las queries con filtro por sede validan contra este set para
 # fallar pronto ante una sede desconocida (evita queries sin resultados
 # silenciosas si llega un parametro mal escrito).
-SEDES_VALIDAS = {"Valencia", "Alicante"}
+SEDES_VALIDAS = {"Valencia", "Alicante", "Castellon"}
 
 
 # Mapeo numero de mes -> string usado en las tablas resumen_mensual_*.

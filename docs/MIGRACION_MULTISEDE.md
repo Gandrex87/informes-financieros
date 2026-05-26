@@ -21,13 +21,22 @@ multi-sede hoy**, el orden de lectura recomendado es:
 4. El resto del documento (historia y razonamiento de cada decisión) solo
    cuando necesites contexto profundo de por qué algo es como es.
 
-### Estado del modelo de datos (2026-05-22)
+### Estado del modelo de datos (2026-05-26)
 
-Todas las tablas relevantes son **COMPARTIDAS con columna `sede`** (decisión
+**Tres sedes en producción**: Valencia, Alicante, Castellón. Todas las
+tablas relevantes son **COMPARTIDAS con columna `sede`** (decisión
 2026-05-20/22). El experimento inicial de separar `ventas_comerciales` en
 `*_valencia`/`*_alicante` se revirtió el mismo día por innecesario. La
 separación por sede SOLO se aplicó a `pagos_directores` inicialmente y
 también se revirtió a compartida el 2026-05-21.
+
+**Castellón se integró 2026-05-26** siguiendo la "Guía para añadir una sede
+nueva" de este documento. Particularidad: el valor en BD es `'Castellon'`
+sin tilde (así se cargó la ingesta); el calculator separa internamente
+`SEDE = "Castellon"` (BD) de `SEDE_DISPLAY = "Castellón"` (PDF) para
+mostrar la tilde correcta en el documento final. Patrón estándar
+`internal_name` vs `display_name`. Ver
+`memory/project_castellon_bd_vs_display.md`.
 
 Tablas hoy con `sede`:
 - `finanzas_automation.ventas_comerciales`
@@ -40,7 +49,7 @@ Tablas hoy con `sede`:
 - `informes_financieros.resumen_mensual_alquileres` (movida 2026-05-22)
 - `informes_financieros.resumen_mensual_alquiler_senales` (movida 2026-05-22)
 
-### Estado del código (2026-05-22)
+### Estado del código (2026-05-26)
 
 - `app/calculator.py` → **DISPATCHER**. Funciones: `build_payload(sede,
   anyo, mes, escenario)` y `template_id_for(sede)`.
@@ -49,17 +58,28 @@ Tablas hoy con `sede`:
 - `app/calculator_alicante.py` → calculator de Alicante. Función entrada
   `build_payload(anyo=..., mes=..., escenario=...)` (sin `sede`, es
   constante `SEDE = "Alicante"`).
+- `app/calculator_castellon.py` → calculator de Castellón (añadido
+  2026-05-26). Función entrada `build_payload(anyo=..., mes=...,
+  escenario=...)`. Constantes propias: `SEDE = "Castellon"`,
+  `SEDE_DISPLAY = "Castellón"`, `N_DIRECTORES = 1`,
+  `SUELDO_FIJO_DIRECTOR = Decimal("1933.73")`,
+  `TRAMO_COMISION_PROVISIONAL = Decimal("0.04")` (Castellón aún no tiene
+  fila en `pagos_directores`; cuando se cargue, sustituir por
+  `_query_tramo_comision`). Métrica rentabilidad slide 2 = OPERATIVA
+  (igual que Valencia, no como Alicante que usa REAL).
 - `app/calculator_base.py` → queries comunes parametrizadas por `sede` +
-  helpers + dataclasses. Cada query valida `sede in SEDES_VALIDAS`.
-- `app/generator.py` → `generate_report` ahora requiere `template_id`
+  helpers + dataclasses. `SEDES_VALIDAS = {"Valencia", "Alicante",
+  "Castellon"}`. Cada query valida la sede contra ese set.
+- `app/generator.py` → `generate_report` requiere `template_id`
   **obligatorio**. El caller resuelve el template via
   `calculator.template_id_for(sede)`.
 
-### Estado de la configuración (2026-05-22)
+### Estado de la configuración (2026-05-26)
 
 Variables de entorno:
 - ❌ Eliminada: `SLIDES_TEMPLATE_ID` (genérico).
-- ✅ Nuevas: `SLIDES_TEMPLATE_ID_VALENCIA`, `SLIDES_TEMPLATE_ID_ALICANTE`.
+- ✅ Activas: `SLIDES_TEMPLATE_ID_VALENCIA`, `SLIDES_TEMPLATE_ID_ALICANTE`,
+  `SLIDES_TEMPLATE_ID_CASTELLON`.
 - Si falta una → `RuntimeError` explícito (lección P-27: nunca generar PDF
   con plantilla equivocada).
 
@@ -78,13 +98,35 @@ Trampa 9 al final del documento.
 ```json
 {
   "status": "ok",
-  "templates": {"Valencia": "1HQ...", "Alicante": "1uQ..."},
-  "user_email": "informes-bot-prod@..."
+  "templates": {
+    "Valencia": "1HQ...",
+    "Alicante": "1uQ...",
+    "Castellon": "1LP..."
+  },
+  "user_email": "sistemas@lioncapitalg.com"
 }
 ```
 
 Si una sede no aparece en `templates`, el problema es de configuración
 (no de código). Ver Trampa 10.
+
+### Patrones reutilizables ya disponibles
+
+Si el slide que vas a integrar es similar a algún slide de Valencia ya
+validado, **lee primero la sección "Patrones reutilizables"** más
+abajo. Hay dos patrones bien establecidos con su mecánica documentada:
+
+- **Patrón 1: Marcador móvil sobre barra vertical** (slides 8 y 10
+  Valencia). Para slides con barra de hitos (BREAK EVEN / MARGEN N%) y
+  un marcador que se mueve según en qué tramo cae la facturación.
+  Módulo: `app/break_even_chart.py` con `BreakEvenChartConfig`.
+- **Patrón 2: Coloreado condicional de tokens según umbrales**.
+  Verde/blanco según `valor >= umbral` o no. Usa el sistema de
+  `_color_overrides` que ya existe.
+
+Para replicarlos en una sede nueva: añadir una `Config` al módulo, crear
+los shapes guía en la plantilla, emitir la clave especial en el calculator.
+**Toda la lógica común está resuelta** — no hay que duplicar nada.
 
 ---
 
@@ -324,6 +366,34 @@ concreta se mueve a su `calculator_<sede>.py`.
       - Lista `comisiones_atrasos` hardcoded del PDF manual (slide 7 Parte C)
         mientras la ingesta de `comisiones_atrasos_directores` carga
         sede='Alicante'.
+- [x] **Castellón**: 1-10 completos en `calculator_castellon.py` con datos
+      reales de Postgres (2026-05-26). Plantilla independiente
+      (`SLIDES_TEMPLATE_ID_CASTELLON` en `.env`, resuelta vía
+      `calculator.template_id_for("Castellon")`). Patrón calcado a Alicante
+      (sin alquileres, sin obra nueva, sin YoY, sin operaciones
+      condicionadas; tarjeta blindaje del slide 10 muestra 0). Constantes
+      provisionales:
+      - `TRAMO_COMISION_PROVISIONAL = Decimal("0.04")` — Castellón aún no
+        tiene fila en `pagos_directores`; cuando se cargue, sustituir por
+        `_query_tramo_comision(SEDE, ...)`.
+      - `FACTURACION_OBJETIVO_PROY_PROVISIONAL = Decimal("160000.00")` —
+        misma situación que Alicante.
+      Particularidades:
+      - **BD vs display**: la columna `sede` en BD es `'Castellon'` (sin
+        tilde); el PDF muestra `'Castellón'`. Separación encapsulada en
+        `SEDE` y `SEDE_DISPLAY` dentro del módulo.
+      - **Rentabilidad slide 2 = OPERATIVA** (`rentabilidad_operativa_pct`,
+        `ebitda_no_extras`), patrón Valencia. NO usa REAL como Alicante.
+        Decisión 2026-05-26: excluir gastos extra para tener una métrica
+        más estable.
+      - **Slide 4 con mensaje informativo**: si pipeline ventas y
+        alquileres están vacíos, se emite `{{mensaje_pipeline_vacio}}` =
+        "Sin operaciones pendientes de firma este mes". Token nuevo en la
+        plantilla.
+      - **Slide 8 BE proyectado**: si los umbrales del mes siguiente están
+        NULL en BD (caso típico al iterar antes de cerrar el mes), el
+        motor de marcador móvil registra WARNING y deja el marcador en su
+        posición de plantilla. NO bloquea generación.
 
 ### Arquitectura del calculator multi-sede — Opción B (✅ APLICADA 2026-05-22)
 
@@ -733,6 +803,144 @@ Si:
 `/health` **no requiere `X-API-Key`**: es público dentro de la red
 Docker. Pensado precisamente para que healthchecks y diagnósticos no
 dependan de credenciales.
+
+### 11. `apply_color_overrides` NO entraba en `elementGroup`s (fix 2026-05-25)
+
+Bug detectado en producción y arreglado el mismo día. `find_text_locations`
+en `app/color_helpers.py` iteraba `slide["pageElements"]` solo a primer
+nivel, **sin entrar dentro de elementos agrupados**. Los shapes que el
+editor de Slides agrupa visualmente viven dentro de un `elementGroup` y
+no eran visibles para el coloreado.
+
+**Síntoma**: en el slide 8 Valencia, los importes de la barra izquierda
+NO se coloreaban porque están dentro de un grupo. Los de la tabla
+derecha SÍ se coloreaban porque están al primer nivel. Resultado:
+override se loguea como "1 localización" en vez de las 2 esperadas; una
+caja se pinta, la otra no.
+
+**Fix**: función helper `_walk_page_elements` que entra recursivamente
+en `elementGroup.children`. Mismo patrón que `_walk_text_shapes` ya
+existente en `break_even_chart.py`.
+
+**Es un bug global del framework**, no del slide 8: cualquier sede futura
+con tokens dentro de grupos se beneficia del fix. No hay que replicar
+nada en Alicante para ello.
+
+## Patrones reutilizables
+
+Patrones que ya están validados en Valencia y que se aplican TAL CUAL al
+informe de Alicante (o sedes futuras) cambiando solo nombres de tokens y
+plantilla. **Lee este bloque antes de implementar el slide equivalente
+en Alicante** — la mecánica completa ya está resuelta.
+
+### Patrón 1: marcador móvil sobre barra vertical (slides 8 y 10 Valencia)
+
+**Caso de uso**: un slide tiene una barra vertical con varios HITOS fijos
+(BREAK EVEN, MARGEN 10%, MARGEN 20%, …) y un MARCADOR (típicamente
+"FACTURACIÓN COBRADA · X €" o similar) que se debe mover arriba/abajo
+según en qué tramo cae el valor respecto a los hitos.
+
+**Validado 2026-05-25** en slide 8 (`{{ingresos_totales}}` se mueve
+según `ingresos_contables` vs `break_even/margen_N_objetivo`) y slide 10
+(`{{facturacion_objetivo_proy}}` se mueve según el valor proyectado vs
+`break_even_proy/margen_N_objetivo_proy`).
+
+**Módulo**: `app/break_even_chart.py`. Generaliza la lógica vía
+`BreakEvenChartConfig`. Para añadir un slide nuevo de otra sede:
+
+1. **En la plantilla** (Google Slides):
+   - Crear **5 cuadros de texto invisibles** (gris claro mientras
+     pruebas, transparente al final) con tokens de la forma:
+     `{{_carril_<nombre>_deficit}}`, `{{_carril_<nombre>_be_m10}}`,
+     `{{_carril_<nombre>_m10_m20}}`, `{{_carril_<nombre>_m20_m30}}`,
+     `{{_carril_<nombre>_superior}}`.
+     - Misma X que el marcador. Y donde QUIERAS que aparezca el marcador
+       cuando los ingresos caigan en cada tramo (decisión visual del
+       usuario, no del código).
+   - (Opcional) Un shape ELLIPSE dorado con token `{{_marker_dot_<nombre>}}`
+     al lado del marcador para que se mueva junto a él preservando el
+     offset.
+2. **En `break_even_chart.py`**: añadir una `BreakEvenChartConfig`
+   nueva (ej. `CONFIG_SLIDE_8_ALICANTE`) con `slide_index`, `token_marker`,
+   `token_marker_dot` y los 5 `token_carril_*`. Y exponer una función
+   pública delgada (`apply_slide_X_<sede>_marker_position`) que llame al
+   motor común `_apply_marker_position(config, ...)`.
+3. **En el calculator de la sede**: emitir en el payload una clave
+   especial `_break_even_position_<sufijo>` con los 5 valores numéricos
+   (el valor a posicionar + los 4 umbrales) en Decimal/float crudo.
+4. **En `generator.py`**: extraer esa clave del payload (igual que
+   `BREAK_EVEN_POSITION_KEY` / `BREAK_EVEN_POSITION_PROY_KEY`) y llamar
+   a la función pública del slide ANTES de `_replace_tokens` (los
+   tokens `{{...}}` literales deben existir aún en ese momento; tras
+   el replace ya no se pueden identificar los shapes).
+
+**Razones técnicas detrás del patrón**:
+
+- **Posicionamiento discreto por carriles, NO interpolación proporcional**.
+  Probamos interpolación primero (compute_marker_y devolvía una Y
+  cualquiera entre techo y fondo); fallaba porque la Y interpolada caía
+  encima de las cajas de los hitos y los textos se solapaban. Con
+  carriles discretos el usuario decide visualmente DÓNDE queda el
+  marcador en cada tramo, sin sorpresas. Tradeoff: se pierde la
+  información fina de "cuánto se cubre dentro del tramo", pero gana
+  legibilidad.
+- **Shapes guía invisibles, no Y hardcodeadas**. Si las Y vivieran en
+  código, mover los hitos en la plantilla requeriría tocar código. Con
+  shapes guía, el usuario maqueta libremente y el código lee las Y
+  donde queden.
+- **Shape acompañante (círculo dorado) con offset preservado**. El
+  `dot_y_offset` se captura UNA vez de la plantilla (diferencia Y_dot −
+  Y_marker) y se aplica en cada movimiento. El usuario controla en la
+  plantilla si el círculo va arriba/debajo/izquierda/derecha del texto;
+  el código lo respeta.
+- **Búsqueda por TOKEN, no por valor de texto**. El localizado de
+  shapes se hace ANTES del replace, leyendo el token literal
+  (`{{facturacion_objetivo_proy}}`). Es robusto incluso si la plantilla
+  cambia el orden o agrupa elementos.
+- **Recorrido recursivo en `elementGroup`s**. Función helper
+  `_walk_text_shapes` que entra dentro de grupos compuestos
+  componiendo translateY padre+hijo. Sin esto, los shapes agrupados en
+  el editor de Slides son invisibles para el localizado (era el bug
+  de la Trampa 9 también).
+
+### Patrón 2: coloreado condicional de tokens según superan/no umbrales
+
+**Caso de uso**: en el mismo slide del Patrón 1, los importes de los
+umbrales (`{{break_even}}`, `{{margen_N_objetivo}}`, etc.) se pintan
+verde si la facturación supera ese umbral, blanco si no. Aplica tanto a
+las cajas de la barra izquierda como a las celdas de la tabla derecha.
+
+**Validado 2026-05-25** en slide 8 Valencia. Patrón ampliable a slide 10
+(decisión del usuario: por ahora NO se aplica al 10) y a cualquier slide
+similar de Alicante.
+
+**Mecánica**:
+1. En el `build_payload` del calculator: añadir overrides al dict
+   `_color_overrides`:
+   ```python
+   for tok, umbral in (
+       ("break_even", be_break_even),
+       ("margen_10_objetivo", be_m10),
+       ...
+   ):
+       if ingresos_be is not None and umbral is not None:
+           color_overrides[tok] = "verde" if ingresos_be >= umbral else "blanco"
+   ```
+2. El módulo `app/color_helpers.apply_color_overrides` busca el VALOR de
+   texto del token en TODOS los shapes (incluidos los dentro de grupos
+   tras el fix 2026-05-25) y pinta los que coinciden.
+
+**Detalle a recordar** (Trampa 11 incluida en el fix): un token de
+umbral aparece en VARIAS cajas físicas del slide (barra + tabla). El
+override pinta **todas** las que tengan el valor → comportamiento
+deseado (visualmente unificado). Si necesitas que solo una de las dos
+cajas se pinte, hay que diferenciarlas con sufijo invisible (técnica
+`​` que ya usamos en `_observacion`).
+
+**Si el fondo del slide es oscuro** (azul oscuro corporativo en Valencia),
+el blanco se ve bien y comunica "umbral no alcanzado". Si el fondo
+fuera claro, el blanco sería invisible — habría que usar otro color
+neutro (gris medio).
 
 ## Checklist resumido para Castellón (o futura sede X)
 

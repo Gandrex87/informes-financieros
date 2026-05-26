@@ -34,6 +34,7 @@ from app.calculator_base import (
     _query_break_even,
     _query_cobros_pendientes,
     _query_comercial,
+    _query_comisiones_atrasos,
     _query_contable,
     _query_pipeline_alquileres,
     _query_pipeline_ventas,
@@ -286,18 +287,30 @@ def build_payload(anyo: int, mes: int, escenario: str = "con_crm") -> dict[str, 
     subtotal_comision_mes = comision_ventas_mes + comision_alquileres_mes
 
     # Parte C: COBRADO DE MESES ANTERIORES.
-    # Provisional 2026-05-22: la tabla informes_financieros.comisiones_atrasos_directores
-    # aun NO tiene filas para sede='Alicante' (la ingesta falta). Hardcodeamos
-    # los 3 atrasos del PDF manual de abril 2026 para validar visualmente la
-    # zona del slide. Cuando la ingesta cargue Alicante, cambiar por:
-    #     comisiones_atrasos_rows = _query_comisiones_atrasos(SEDE)
-    # y construir la lista como hace calculator.py (Valencia, lineas 547-562).
+    # Resuelto 2026-05-26: ingesta carga ahora filas con sede='Alicante' en
+    # informes_financieros.comisiones_atrasos_directores. Estado vivo
+    # (sin filtro de anyo/mes). Mismo patron exacto que Valencia (ver
+    # calculator_valencia.py:_query_comisiones_atrasos consumption block):
+    # - mes_origen de BD '(Feb.)' -> mostrar sin parentesis 'Feb.'
+    # - porcentaje de BD 0.03 -> mostrar como '(3%)'
+    # - importe formateado a 2 decimales para coherencia con subtotales.
+    comisiones_atrasos_rows = _query_comisiones_atrasos(SEDE)
     comisiones_atrasos = [
-        {"nombre": "Av. Ibiza 35:",        "mes": "(en feb,", "tramo": "al 3%)", "importe": "240 €"},
-        {"nombre": "C. Garbinet:",         "mes": "(en mar,", "tramo": "al 0%)", "importe": "0 €"},
-        {"nombre": "C. Alcalde Carratalá:","mes": "(en mar,", "tramo": "al 0%)", "importe": "0 €"},
+        {
+            "nombre": row["inmueble"] or "",
+            "mes": (row["mes_origen"] or "").strip("()"),
+            "tramo": (
+                f"({int(row['porcentaje'] * 100)}%)"
+                if row["porcentaje"] is not None else ""
+            ),
+            "importe": format_euro(row["importe"], decimales=2),
+        }
+        for row in comisiones_atrasos_rows
     ]
-    subtotal_comision_atrasos = Decimal("240.00")  # idem provisional
+    subtotal_comision_atrasos = sum(
+        (Decimal(str(row["importe"])) if row["importe"] else Decimal(0))
+        for row in comisiones_atrasos_rows
+    )
 
     # Parte B: calculo final.
     # OJO Alicante: N_DIRECTORES = 1, asi que comision_variable_por_director =
@@ -383,6 +396,55 @@ def build_payload(anyo: int, mes: int, escenario: str = "con_crm") -> dict[str, 
     return {
         "_color_overrides": color_overrides,
         "_chart_reservas_arras": chart_periodos,
+
+        # --- Slide 6: marcador movil de la barra (Break Even mes actual) ---
+        # Equivalente al slide 8 de Valencia pero el marcador es
+        # {{contratos_firmados}} (arras firmadas), no {{ingresos_totales}}.
+        # El valor a posicionar es base_be = com_actual.arras_total (decision
+        # 2026-05-22: el marcador y los estados de la tabla del slide 6
+        # usan la misma base para que sean coherentes visualmente).
+        # La plantilla Alicante slide 6 tiene los 5 cuadros guia invisibles
+        # con tokens {{_carril_*}} (sin sufijo, mismos nombres que Valencia
+        # slide 8); no hay colision porque cada sede tiene su propia plantilla.
+        "_break_even_position_slide_6_alc": {
+            "contratos_firmados": base_be,
+            "break_even": be_break_even,
+            "margen_10": be_m10,
+            "margen_20": be_m20,
+            "margen_30": be_m30,
+        },
+
+        # --- Slide 8: marcador movil de la barra (Break Even proyectado) ---
+        # Valores numericos crudos que generator.py extrae para posicionar
+        # {{facturacion_objetivo_proy}} en uno de los 5 carriles de la
+        # barra (deficit / BE-M10 / M10-M20 / M20-M30 / superior). La
+        # plantilla Alicante slide 8 tiene los 5 cuadros guia invisibles
+        # con tokens {{_carril_proy_*}} (mismos nombres que Valencia
+        # slide 10), pero en slide_index=7 (no 9 como Valencia). Por eso
+        # usamos la clave _break_even_position_slide_8_alc que el generator
+        # encamina a CONFIG_SLIDE_8_ALICANTE (slide_index=7).
+        # OJO: en Alicante facturacion_objetivo_proy es una constante
+        # manual (FACTURACION_OBJETIVO_PROY_PROVISIONAL=160.000 €), no
+        # viene de BD. Los 4 umbrales SI vienen de BD (break_even_proy).
+        # Decision usuario 2026-05-25: el marcador se posiciona segun donde
+        # cae la constante 160.000 € respecto a los umbrales reales del
+        # mes siguiente. Patron identico a Valencia (el valor a posicionar
+        # es el mismo que muestra el marcador).
+        "_break_even_position_slide_8_alc": {
+            "facturacion_objetivo_proy": FACTURACION_OBJETIVO_PROY_PROVISIONAL,
+            "break_even_proy": (
+                break_even_proy.break_even if break_even_proy else None
+            ),
+            "margen_10_proy": (
+                break_even_proy.ingresos_margen_10 if break_even_proy else None
+            ),
+            "margen_20_proy": (
+                break_even_proy.ingresos_margen_20 if break_even_proy else None
+            ),
+            "margen_30_proy": (
+                break_even_proy.ingresos_margen_30 if break_even_proy else None
+            ),
+        },
 
         # --- Identificacion ---
         "sede": SEDE,

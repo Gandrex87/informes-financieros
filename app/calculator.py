@@ -61,6 +61,10 @@ def build_payload(
         from app.calculator_alicante import build_payload as _build
         return _build(anyo=anyo, mes=mes, escenario=escenario)
 
+    if sede == "Castellon":
+        from app.calculator_castellon import build_payload as _build
+        return _build(anyo=anyo, mes=mes, escenario=escenario)
+
     # Inalcanzable: SEDES_VALIDAS ya filtro arriba. Defensa por si se añade
     # una sede al set sin añadirla aqui.
     raise AssertionError(f"Sede '{sede}' valida pero sin dispatch implementado.")
